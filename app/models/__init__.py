@@ -1,5 +1,6 @@
 """SQLAlchemy domain models and metadata for multi-tenant smart restaurant platform."""
 
+from app.models.audit import AuditLog
 from app.models.auth import Branch, Table, Tenant, User, UserBranchAccess
 from app.models.base import Base, LocalizedText, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.catalog import Category, Item, ModifierGroup, ModifierOption
@@ -51,4 +52,6 @@ __all__ = [
     # Service & Feedback
     "ServiceRequest",
     "Review",
+    # Audit & Compliance
+    "AuditLog",
 ]

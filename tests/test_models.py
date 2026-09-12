@@ -50,11 +50,11 @@ from app.models import (
 def test_mapper_compilation():
     """Verify that all SQLAlchemy 2.0 mappers configure without circular import or typing errors."""
     configure_mappers()
-    assert len(Base.metadata.tables) == 14
+    assert len(Base.metadata.tables) == 15
 
 
 def test_table_registration():
-    """Verify all 14 required domain tables are properly registered in Base.metadata."""
+    """Verify all 15 domain and audit tables are properly registered in Base.metadata."""
     expected_tables = {
         "tenants",
         "branches",
@@ -70,6 +70,7 @@ def test_table_registration():
         "payments",
         "service_requests",
         "reviews",
+        "audit_logs",
     }
     actual_tables = set(Base.metadata.tables.keys())
     assert expected_tables == actual_tables
@@ -87,14 +88,17 @@ def test_primary_keys_are_uuid():
 
 
 def test_timestamp_mixin():
-    """Verify all tables inherit created_at and updated_at with timezone support."""
+    """Verify all tables inherit created_at and domain entities inherit updated_at with timezone support."""
     for table_name, table in Base.metadata.tables.items():
         assert "created_at" in table.c, f"Table {table_name} missing created_at"
-        assert "updated_at" in table.c, f"Table {table_name} missing updated_at"
         assert table.c.created_at.type.timezone is True
-        assert table.c.updated_at.type.timezone is True
         assert table.c.created_at.server_default is not None
-        assert table.c.updated_at.server_default is not None
+
+        # audit_logs is an append-only ledger without mutation/updated_at
+        if table_name != "audit_logs":
+            assert "updated_at" in table.c, f"Table {table_name} missing updated_at"
+            assert table.c.updated_at.type.timezone is True
+            assert table.c.updated_at.server_default is not None
 
 
 def test_geofence_attributes():
@@ -484,9 +488,10 @@ def test_alembic_metadata_auto_detection():
     # Import target_metadata directly as done in env.py
     from app.models import Base as AppBase
 
-    assert len(AppBase.metadata.tables) == 14
+    assert len(AppBase.metadata.tables) == 15
     assert "orders" in AppBase.metadata.tables
     assert "branches" in AppBase.metadata.tables
+    assert "audit_logs" in AppBase.metadata.tables
 
 
 def test_postgresql_ddl_generation():
