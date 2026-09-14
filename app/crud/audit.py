@@ -28,9 +28,7 @@ async def get_audit_logs(
     base_query = select(AuditLog).where(AuditLog.tenant_id == tenant_id)
 
     if branch_ids is not None:
-        base_query = base_query.where(
-            (AuditLog.branch_id.in_(branch_ids)) | (AuditLog.branch_id.is_(None))
-        )
+        base_query = base_query.where(AuditLog.branch_id.in_(branch_ids))
 
     if action:
         base_query = base_query.where(AuditLog.action == action)

@@ -59,7 +59,6 @@ class AuditLogger:
             async with async_session_factory() as session:
                 session.add(audit_entry)
                 await session.commit()
-                await session.refresh(audit_entry)
                 return audit_entry
 
         except Exception as exc:

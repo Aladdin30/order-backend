@@ -110,6 +110,10 @@ def parse_accept_language(header: str | None) -> SupportedLocale:
 
 # Centralized system and exception message catalog
 SYSTEM_MESSAGES: dict[str, dict[SupportedLocale, str]] = {
+    "GEOLOCATION_REQUIRED": {
+        SupportedLocale.AR: "إحداثيات الموقع الجغرافي مطلوبة للتحقق من النطاق الجغرافي للفرع",
+        SupportedLocale.EN: "Client geolocation coordinates are required for branch geofence verification",
+    },
     "OUT_OF_GEOFENCE": {
         SupportedLocale.AR: "أنت خارج النطاق الجغرافي المسموح به للفرع",
         SupportedLocale.EN: "You are outside the permitted branch geofence radius",

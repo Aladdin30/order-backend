@@ -7,7 +7,6 @@ import hashlib
 import hmac
 import struct
 import uuid
-from typing import ClassVar
 
 from app.core.config import settings
 from app.schemas.qr import QRTokenPayload
@@ -18,7 +17,15 @@ class InvalidTokenError(Exception):
 
 
 class UnsupportedKeyVersionError(InvalidTokenError):
-    """Raised when the QR token references an unsupported or revoked key version."""
+    """Raised when the QR token references an unsupported key version."""
+
+
+class RevokedKeyError(InvalidTokenError):
+    """Raised when the QR token references an explicitly revoked key version."""
+
+
+class MissingActiveKeyError(InvalidTokenError):
+    """Raised when the configured active signing key is missing from the key registry."""
 
 
 class TokenTamperedError(InvalidTokenError):
@@ -30,37 +37,88 @@ class QRSignatureEngine:
 
     Encodes tenant, branch, table identifiers and key version into a compact binary representation,
     serialized with URL-safe Base64 (RFC 4648 without padding), and authenticated with HMAC-SHA256.
+
+    Keys are loaded exclusively from application settings to ensure consistency
+    across multiple worker processes and container replicas.
     """
 
-    # Versioned key registry for zero-downtime key rotation
-    _keys: ClassVar[dict[int, str]] = {}
+    @classmethod
+    def get_revoked_keys(cls) -> set[int]:
+        """Retrieve set of explicitly revoked key versions."""
+        return settings.get_revoked_key_versions()
 
     @classmethod
-    def _initialize_default_keys(cls) -> None:
-        """Ensure active key registry is populated with configured default secrets."""
-        if not cls._keys:
-            default_secret = settings.QR_SECRET_KEY or settings.SECRET_KEY
-            cls._keys[settings.QR_KEY_VERSION] = default_secret
+    def _load_keys(cls) -> dict[int, str]:
+        """Load valid signing keys from application settings.
+
+        Authoritative sources:
+        1. QR_KEY_REGISTRY: If configured, it is the authoritative registry of allowed keys.
+           Keys NOT in the registry are NOT loaded.
+        2. Fallback: Only if QR_KEY_REGISTRY is completely empty, default to
+           QR_SECRET_KEY or SECRET_KEY for QR_KEY_VERSION.
+        3. Revocation: Any key in QR_REVOKED_KEYS is strictly excluded and NEVER restored.
+        """
+        revoked = cls.get_revoked_keys()
+        registry = settings.get_qr_key_registry()
+
+        if registry:
+            # Explicit registry provided: it is authoritative. Do NOT re-inject missing keys.
+            keys = {v: k for v, k in registry.items() if v not in revoked}
+        else:
+            # Fallback: only if registry is empty AND active key is not revoked
+            keys = {}
+            if settings.QR_KEY_VERSION not in revoked:
+                default_secret = settings.QR_SECRET_KEY or settings.SECRET_KEY
+                keys[settings.QR_KEY_VERSION] = default_secret
+
+        return keys
 
     @classmethod
-    def register_key(cls, version: int, secret_key: str) -> None:
-        """Register or rotate a cryptographic signing key for a specific version."""
-        cls._keys[version] = secret_key
+    def get_active_key_version(cls) -> int:
+        """Authoritative source of truth for the active signing key version."""
+        if settings.QR_ACTIVE_KEY_VERSION is not None:
+            return settings.QR_ACTIVE_KEY_VERSION
+        return settings.QR_KEY_VERSION
 
     @classmethod
-    def revoke_key(cls, version: int) -> None:
-        """Revoke a specific key version to immediately invalidate tokens signed with it."""
-        cls._keys.pop(version, None)
+    def get_active_key(cls) -> tuple[int, str]:
+        """Retrieve the configured active key version and its secret key.
+
+        Raises:
+            RevokedKeyError: If the active key version has been revoked.
+            MissingActiveKeyError: If the active key version does not exist in registry.
+        """
+        version = cls.get_active_key_version()
+        revoked = cls.get_revoked_keys()
+        if version in revoked:
+            raise RevokedKeyError(
+                f"Configured active signing key version {version} has been revoked. Key rotation required."
+            )
+        keys = cls._load_keys()
+        if version not in keys:
+            raise MissingActiveKeyError(
+                f"Configured active signing key version {version} is not configured in the key registry."
+            )
+        return version, keys[version]
 
     @classmethod
     def get_key(cls, version: int) -> str:
-        """Retrieve the secret key for the requested key version."""
-        cls._initialize_default_keys()
-        if version not in cls._keys:
-            raise UnsupportedKeyVersionError(
-                f"Unsupported or revoked key version: {version}. Active versions: {sorted(cls._keys.keys())}"
+        """Retrieve the secret key for the requested key version.
+
+        Raises:
+            RevokedKeyError: If the key version has been revoked.
+            UnsupportedKeyVersionError: If the key version is not configured.
+        """
+        if version in cls.get_revoked_keys():
+            raise RevokedKeyError(
+                f"Key version {version} has been revoked and cannot be used."
             )
-        return cls._keys[version]
+        keys = cls._load_keys()
+        if version not in keys:
+            raise UnsupportedKeyVersionError(
+                f"Unsupported or revoked key version: {version}. Active versions: {sorted(keys.keys())}"
+            )
+        return keys[version]
 
     @classmethod
     def sign_table_token(
@@ -68,17 +126,21 @@ class QRSignatureEngine:
         tenant_id: uuid.UUID,
         branch_id: uuid.UUID,
         table_id: uuid.UUID,
-        key_version: int = 1,
+        key_version: int | None = None,
     ) -> str:
         """Generate a compact, URL-safe, tamper-proof physical table QR token.
 
         Format: <compact_urlsafe_payload>.<signature>
         """
-        # Retrieve signing key for version
-        secret_key = cls.get_key(key_version)
+        # Retrieve signing key: defaults strictly to active key
+        if key_version is None:
+            effective_version, secret_key = cls.get_active_key()
+        else:
+            effective_version = key_version
+            secret_key = cls.get_key(effective_version)
 
         # Pack payload into 52-byte binary: 3x UUID (16 bytes each) + 32-bit uint (4 bytes)
-        payload_bytes = tenant_id.bytes + branch_id.bytes + table_id.bytes + struct.pack(">I", key_version)
+        payload_bytes = tenant_id.bytes + branch_id.bytes + table_id.bytes + struct.pack(">I", effective_version)
 
         # Encode with URL-Safe Base64 without padding (RFC 4648)
         payload_b64 = base64.urlsafe_b64encode(payload_bytes).decode("ascii").rstrip("=")
@@ -144,17 +206,9 @@ class QRSignatureEngine:
 
         # Constant-time comparison to prevent timing attacks
         if not hmac.compare_digest(expected_sig_b64, sig_b64):
-            # Fallback: check if signature was computed directly over raw binary payload
-            expected_sig_raw = hmac.new(
-                secret_key.encode("utf-8"),
-                raw_payload,
-                hashlib.sha256,
-            ).digest()
-            expected_sig_raw_b64 = base64.urlsafe_b64encode(expected_sig_raw).decode("ascii").rstrip("=")
-            if not hmac.compare_digest(expected_sig_raw_b64, sig_b64):
-                raise TokenTamperedError(
-                    "Cryptographic signature verification failed: token signature is invalid or payload has been tampered with."
-                )
+            raise TokenTamperedError(
+                "Cryptographic signature verification failed: token signature is invalid or payload has been tampered with."
+            )
 
         return QRTokenPayload(
             tenant_id=tenant_id,
@@ -162,3 +216,7 @@ class QRSignatureEngine:
             table_id=table_id,
             key_version=key_version,
         )
+
+    # Convenient alias for decode_and_verify_signature
+    verify_table_token = decode_and_verify_signature
+

@@ -3,6 +3,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.middleware.audit_middleware import AuditMiddleware
@@ -25,10 +26,11 @@ def create_app() -> FastAPI:
     )
 
     # CORS configuration
+    is_wildcard_cors = settings.BACKEND_CORS_ORIGINS == ["*"]
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=settings.BACKEND_CORS_ORIGINS,
+        allow_credentials=not is_wildcard_cors,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -50,6 +52,14 @@ def create_app() -> FastAPI:
     @application.get("/health", tags=["system"], summary="Service Health Check")
     async def health_check() -> dict[str, str]:
         return {"status": "healthy", "service": settings.PROJECT_NAME}
+
+    @application.get("/", include_in_schema=False)
+    async def root_redirect() -> RedirectResponse:
+        return RedirectResponse(url=f"{settings.API_V1_STR}/docs")
+
+    @application.get("/docs", include_in_schema=False)
+    async def docs_redirect() -> RedirectResponse:
+        return RedirectResponse(url=f"{settings.API_V1_STR}/docs")
 
     return application
 

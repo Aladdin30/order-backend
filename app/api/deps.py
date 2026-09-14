@@ -32,6 +32,7 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def get_current_user_context(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_async_db),
 ) -> SecurityContext:
@@ -77,6 +78,11 @@ async def get_current_user_context(
     # Resolve allowed branches from explicit M:N associations
     allowed_branch_ids = frozenset(access.branch_id for access in user.branch_access)
 
+    # Populate request.state with verified claims for audit middleware
+    request.state.tenant_id = tenant_id
+    request.state.user_id = user.id
+    request.state.actor_role = user.role.value
+
     return SecurityContext(
         user=user,
         tenant_id=tenant_id,
@@ -111,12 +117,14 @@ class EnforceBranchAccess:
         context: SecurityContext = Depends(get_current_user_context),
         db: AsyncSession = Depends(get_async_db),
     ) -> uuid.UUID:
-        # Extract branch ID from header, query parameter, or path parameter
-        branch_id_str = (
-            request.headers.get(self.header_name)
-            or request.query_params.get("branch_id")
-            or request.path_params.get("branch_id")
-        )
+        # Extract branch ID from all available sources
+        # Priority: Path Param > Query Param > Header (most specific wins)
+        path_branch = request.path_params.get("branch_id")
+        query_branch = request.query_params.get("branch_id")
+        header_branch = request.headers.get(self.header_name)
+
+        # Resolve in priority order
+        branch_id_str = path_branch or query_branch or header_branch
 
         if not branch_id_str:
             raise HTTPException(
@@ -131,6 +139,22 @@ class EnforceBranchAccess:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Malformed branch UUID: '{branch_id_str}'.",
             )
+
+        # Conflict detection: if multiple sources provide different UUIDs, reject
+        provided_values: list[str] = [v for v in (path_branch, query_branch, header_branch) if v]
+        if len(provided_values) > 1:
+            try:
+                unique_uuids = {uuid.UUID(v) for v in provided_values}
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="One or more branch_id values are malformed UUIDs.",
+                )
+            if len(unique_uuids) > 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Conflicting branch_id values across path, query, and header. They must match.",
+                )
 
         # Confirm branch exists and belongs strictly to the actor's tenant
         stmt = select(Branch).where(
@@ -149,4 +173,5 @@ class EnforceBranchAccess:
 
         # Confirm actor has permission to operate within this branch
         context.assert_branch_access(branch_id)
+        request.state.branch_id = branch_id
         return branch_id

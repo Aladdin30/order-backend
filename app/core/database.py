@@ -22,10 +22,22 @@ def _compile_jsonb_sqlite(type_, compiler, **kw) -> str:
 def create_engine_instance(db_url: str | None = None) -> AsyncEngine:
     """Instantiate an AsyncEngine configured for high concurrency."""
     url = db_url or settings.DATABASE_URL
+
+    # Pool settings only apply to connection-pooled drivers (not SQLite)
+    pool_kwargs: dict = {}
+    if not url.startswith("sqlite"):
+        pool_kwargs = {
+            "pool_pre_ping": True,
+            "pool_size": 20,
+            "max_overflow": 10,
+            "pool_recycle": 1800,
+        }
+
     return create_async_engine(
         url,
         echo=False,
         future=True,
+        **pool_kwargs,
     )
 
 

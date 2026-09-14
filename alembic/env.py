@@ -6,6 +6,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from app.core.config import settings
 from app.models import Base
 
 # this is the Alembic Config object, which provides
@@ -22,8 +23,12 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    """Retrieve database URL from environment variable or alembic.ini fallback."""
-    return os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
+    """Retrieve synchronous database URL for Alembic migrations.
+
+    Always uses the synchronous driver (psycopg2) to ensure compatibility
+    with Alembic's synchronous migration runner.
+    """
+    return os.getenv("SYNC_DATABASE_URL", settings.SYNC_DATABASE_URL)
 
 
 def run_migrations_offline() -> None:

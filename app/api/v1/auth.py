@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import get_async_db, get_current_user_context
 from app.core.config import settings
 from app.core.context import SecurityContext
+from app.core.rate_limit import rate_limit, resolve_client_ip
 from app.core.security import create_access_token, verify_password
 from app.models.auth import User
 from app.schemas.auth import TokenResponse, UserResponse
@@ -27,15 +28,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     summary="Obtain OAuth2 Access Token",
     description="Authenticate staff user credentials via OAuth2 password flow and issue signed JWT.",
 )
+@rate_limit(max_requests=5, window_seconds=60)
 async def login_for_access_token(
     request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Annotated[AsyncSession, Depends(get_async_db)],
 ) -> TokenResponse:
     """Issue JWT access token upon valid email/password credentials."""
-    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
-        request.client.host if request.client else "127.0.0.1"
-    )
+    client_ip = resolve_client_ip(request)
     user_agent = request.headers.get("user-agent", "unknown")
 
     # Locate user by email

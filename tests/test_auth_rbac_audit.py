@@ -721,3 +721,270 @@ async def test_audit_logs_query_endpoint(client: AsyncClient, seed_data: dict, t
     data = res_admin.json()
     assert data["total"] >= 2
     assert len(data["items"]) >= 2
+
+
+# ---------------------------------------------------------------------------
+# 6. AuditMiddleware Context Population & Security Auditing Tests (Issue #1 & #4)
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_audit_middleware_captures_authenticated_mutation(
+    client: AsyncClient,
+    seed_data: dict,
+    test_session: AsyncSession,
+) -> None:
+    """Verify AuditMiddleware captures mutation via request.state populated by deps (Issue #1)."""
+    super_admin = seed_data["super_admin"]
+    branch = seed_data["branch_1"]
+
+    table = Table(
+        branch_id=branch.id,
+        table_number="T-01",
+        capacity=4,
+        is_active=True,
+    )
+    test_session.add(table)
+    await test_session.commit()
+
+    admin_token = create_access_token({
+        "sub": str(super_admin.id),
+        "tenant_id": str(super_admin.tenant_id),
+        "role": super_admin.role.value,
+        "email": super_admin.email,
+    })
+
+    # Call authenticated POST endpoint
+    response = await client.post(
+        f"{settings.API_V1_STR}/qr/generate-token",
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "X-Branch-ID": str(branch.id),
+        },
+        json={"table_id": str(table.id)},
+    )
+    assert response.status_code == status.HTTP_200_OK
+
+    # Query DB to confirm audit record was created with verified tenant_id and user_id
+    stmt = (
+        select(AuditLog)
+        .where(
+            AuditLog.tenant_id == super_admin.tenant_id,
+            AuditLog.user_id == super_admin.id,
+            AuditLog.resource_type == "HTTP_MUTATION",
+        )
+        .order_by(AuditLog.created_at.desc())
+    )
+    result = await test_session.execute(stmt)
+    audit_entry = result.scalars().first()
+    assert audit_entry is not None
+    assert audit_entry.actor_role == super_admin.role.value
+    assert audit_entry.branch_id == branch.id
+    assert audit_entry.status == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_audit_middleware_records_403_access_forbidden(
+    client: AsyncClient,
+    seed_data: dict,
+    test_session: AsyncSession,
+) -> None:
+    """Verify AuditMiddleware records 403 Forbidden with verified tenant context (Issue #1 & #4)."""
+    cashier = seed_data["cashier"]
+    branch = seed_data["branch_1"]
+
+    table = Table(
+        branch_id=branch.id,
+        table_number="T-02",
+        capacity=2,
+        is_active=True,
+    )
+    test_session.add(table)
+    await test_session.commit()
+
+    cashier_token = create_access_token({
+        "sub": str(cashier.id),
+        "tenant_id": str(cashier.tenant_id),
+        "role": cashier.role.value,
+        "email": cashier.email,
+    })
+
+    # Cashier attempts restricted endpoint (requires SUPER_ADMIN or BRANCH_ADMIN)
+    response = await client.post(
+        f"{settings.API_V1_STR}/qr/generate-token",
+        headers={
+            "Authorization": f"Bearer {cashier_token}",
+            "X-Branch-ID": str(branch.id),
+        },
+        json={"table_id": str(table.id)},
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    # Check that ACCESS_FORBIDDEN audit log was recorded in DB
+    stmt = (
+        select(AuditLog)
+        .where(
+            AuditLog.tenant_id == cashier.tenant_id,
+            AuditLog.user_id == cashier.id,
+            AuditLog.action == "ACCESS_FORBIDDEN",
+        )
+        .order_by(AuditLog.created_at.desc())
+    )
+    result = await test_session.execute(stmt)
+    audit_entry = result.scalars().first()
+    assert audit_entry is not None
+    assert audit_entry.actor_role == cashier.role.value
+    assert audit_entry.status == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_audit_middleware_logs_401_unauthorized(
+    client: AsyncClient,
+) -> None:
+    """Verify AuditMiddleware logs security warning on 401 without crashing (Issue #4)."""
+    with patch("app.api.middleware.audit_middleware.logger") as mock_logger:
+        response = await client.get(
+            f"{settings.API_V1_STR}/audit/logs",
+            headers={"Authorization": "Bearer completely-invalid-or-forged-token"},
+        )
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        # Confirm structured security warning was logged
+        assert mock_logger.warning.called
+        log_args = mock_logger.warning.call_args[0]
+        assert "AUTH_UNAUTHORIZED" in log_args
+
+
+# ---------------------------------------------------------------------------
+# Background Task Fault Isolation Tests (Issue #3)
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_audit_background_task_successful_execution() -> None:
+    """Safe background executor executes valid task cleanly."""
+    from app.api.middleware.audit_middleware import safe_execute_background_task
+
+    executed = False
+
+    async def sample_task():
+        nonlocal executed
+        executed = True
+
+    await safe_execute_background_task(sample_task, task_name="test_success")
+    assert executed is True
+
+
+@pytest.mark.asyncio
+async def test_audit_background_task_first_fails_second_succeeds() -> None:
+    """Failure in first background task must not prevent secondary background task from running (Issue #3)."""
+    from app.api.middleware.audit_middleware import _chain_background_tasks
+
+    task2_ran = False
+
+    async def failing_task():
+        raise RuntimeError("Audit downstream sink exploded!")
+
+    async def healthy_task():
+        nonlocal task2_ran
+        task2_ran = True
+
+    with patch("app.api.middleware.audit_middleware.logger") as mock_logger:
+        await _chain_background_tasks(failing_task, healthy_task)
+        # Confirm healthy task completed despite task 1 failure
+        assert task2_ran is True
+        # Confirm failure in task 1 was logged with exception details
+        assert mock_logger.exception.called
+        log_fmt = mock_logger.exception.call_args[0][0]
+        log_args = mock_logger.exception.call_args[0][1:]
+        formatted_msg = log_fmt % log_args
+        assert "Audit background task 'failing_task' failed" in formatted_msg
+
+
+@pytest.mark.asyncio
+async def test_audit_background_task_second_fails_first_unaffected() -> None:
+    """Failure in secondary background task is safely isolated and logged."""
+    from app.api.middleware.audit_middleware import _chain_background_tasks
+
+    task1_ran = False
+
+    async def healthy_task():
+        nonlocal task1_ran
+        task1_ran = True
+
+    async def failing_task():
+        raise ValueError("Secondary metric pipeline unreachable")
+
+    with patch("app.api.middleware.audit_middleware.logger") as mock_logger:
+        await _chain_background_tasks(healthy_task, failing_task)
+        assert task1_ran is True
+        assert mock_logger.exception.called
+        log_fmt = mock_logger.exception.call_args[0][0]
+        log_args = mock_logger.exception.call_args[0][1:]
+        formatted_msg = log_fmt % log_args
+        assert "failing_task" in formatted_msg
+
+
+@pytest.mark.asyncio
+async def test_audit_background_multiple_independent_operations() -> None:
+    """Multiple independent operations execute; failures in the middle are isolated."""
+    from app.api.middleware.audit_middleware import _chain_background_tasks
+
+    results = []
+
+    async def op1():
+        results.append(1)
+
+    async def op2_fail():
+        raise ConnectionResetError("Kafka audit buffer disconnected")
+
+    async def op3():
+        results.append(3)
+
+    with patch("app.api.middleware.audit_middleware.logger"):
+        await _chain_background_tasks(op1, op2_fail, op3)
+        assert results == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_audit_background_failure_does_not_break_http_request(
+    client: AsyncClient,
+    seed_data: dict,
+    test_session: AsyncSession,
+) -> None:
+    """A crash in background audit logging must NOT crash or fail the main HTTP response."""
+    super_admin = seed_data["super_admin"]
+    branch = seed_data["branch_1"]
+
+    table = Table(
+        branch_id=branch.id,
+        table_number="T-AUDIT-FAIL",
+        capacity=4,
+        is_active=True,
+    )
+    test_session.add(table)
+    await test_session.commit()
+
+    admin_token = create_access_token({
+        "sub": str(super_admin.id),
+        "tenant_id": str(super_admin.tenant_id),
+        "role": super_admin.role.value,
+        "email": super_admin.email,
+    })
+
+    # Simulate database or background audit logger crash
+    with patch(
+        "app.services.audit_service.AuditLogger.log",
+        side_effect=RuntimeError("Audit database connection failure"),
+    ):
+        with patch("app.api.middleware.audit_middleware.logger") as mock_logger:
+            response = await client.post(
+                f"{settings.API_V1_STR}/qr/generate-token",
+                headers={
+                    "Authorization": f"Bearer {admin_token}",
+                    "X-Branch-ID": str(branch.id),
+                },
+                json={"table_id": str(table.id)},
+            )
+            # Main HTTP request succeeded
+            assert response.status_code == status.HTTP_200_OK
+            # Audit failure was logged, not silently swallowed
+            assert mock_logger.exception.called
+
+
+

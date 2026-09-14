@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class QRTokenPayload(BaseModel):
@@ -23,6 +23,17 @@ class QRVerifyRequest(BaseModel):
     """Incoming request payload for table QR verification."""
 
     token: str = Field(..., min_length=1, description="Compact URL-safe physical QR token")
+    latitude: float | None = Field(None, ge=-90, le=90, description="Client device GPS latitude for server-side geofence validation")
+    longitude: float | None = Field(None, ge=-180, le=180, description="Client device GPS longitude for server-side geofence validation")
+
+    @model_validator(mode="after")
+    def _validate_coordinates_paired(self) -> "QRVerifyRequest":
+        """Ensure both latitude and longitude are supplied together or both omitted."""
+        has_lat = self.latitude is not None
+        has_lon = self.longitude is not None
+        if has_lat != has_lon:
+            raise ValueError("Both latitude and longitude must be provided together.")
+        return self
 
 
 class QRVerificationResponse(BaseModel):
@@ -46,7 +57,7 @@ class QRGenerateTokenRequest(BaseModel):
     """Staff request payload to generate a signed physical table QR token."""
 
     table_id: uuid.UUID = Field(..., description="Physical table UUID")
-    key_version: int = Field(1, ge=1, description="Signing key version (defaults to active version)")
+    key_version: int | None = Field(None, ge=1, description="Signing key version (defaults to active configured key version)")
 
 
 class QRGenerateTokenResponse(BaseModel):
