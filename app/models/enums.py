@@ -1,0 +1,93 @@
+"""Enumerations for multi-tenant smart restaurant platform."""
+
+from enum import StrEnum
+
+
+class UserRole(StrEnum):
+    """User access hierarchy and role-based permissions."""
+
+    SUPER_ADMIN = "SUPER_ADMIN"
+    REGIONAL_MANAGER = "REGIONAL_MANAGER"
+    BRANCH_ADMIN = "BRANCH_ADMIN"
+    CASHIER = "CASHIER"
+    KITCHEN_STAFF = "KITCHEN_STAFF"
+
+
+class TableStatus(StrEnum):
+    """Real-time physical table operational lifecycle statuses."""
+
+    AVAILABLE = "AVAILABLE"
+    BROWSING = "BROWSING"
+    AWAITING_FOOD = "AWAITING_FOOD"
+    EATING = "EATING"
+    BILL_REQUESTED = "BILL_REQUESTED"
+    NEEDS_CLEANING = "NEEDS_CLEANING"
+
+
+class KitchenStation(StrEnum):
+    """Kitchen routing stations for order preparation."""
+
+    HOT_KITCHEN = "HOT_KITCHEN"
+    COLD_KITCHEN = "COLD_KITCHEN"
+    BEVERAGE = "BEVERAGE"
+    DESSERT = "DESSERT"
+
+
+class OrderStatus(StrEnum):
+    """Comprehensive lifecycle statuses of an order."""
+
+    DRAFT = "DRAFT"
+    PENDING_STAFF_CONFIRMATION = "PENDING_STAFF_CONFIRMATION"
+    SUBMITTED = "SUBMITTED"
+    PREPARING = "PREPARING"
+    READY = "READY"
+    DELIVERED = "DELIVERED"
+    CLOSED = "CLOSED"
+    CANCELLED = "CANCELLED"
+
+
+class OrderType(StrEnum):
+    """Order fulfillment channels."""
+
+    DINE_IN = "DINE_IN"
+    TAKEAWAY = "TAKEAWAY"
+
+
+class ServiceRequestType(StrEnum):
+    """Guest table-side assistance request categories."""
+
+    WATER = "WATER"
+    CUTLERY = "CUTLERY"
+    NAPKINS = "NAPKINS"
+    PLATES = "PLATES"
+    WAITER_CALL = "WAITER_CALL"
+    PACK_LEFTOVERS = "PACK_LEFTOVERS"
+    BILL_REQUEST = "BILL_REQUEST"
+
+
+class ServiceRequestStatus(StrEnum):
+    """Service request dispatch and completion statuses."""
+
+    PENDING = "PENDING"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    COMPLETED = "COMPLETED"
+    DISMISSED = "DISMISSED"
+
+
+class PaymentMethod(StrEnum):
+    """Accepted payment tender types."""
+
+    CASH = "CASH"
+    CARD_TERMINAL = "CARD_TERMINAL"
+    STRIPE = "STRIPE"
+    APPLE_PAY = "APPLE_PAY"
+    LOCAL_WALLET = "LOCAL_WALLET"
+
+
+class PaymentStatus(StrEnum):
+    """Settlement status for transactions."""
+
+    PENDING = "PENDING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    REFUNDED = "REFUNDED"
