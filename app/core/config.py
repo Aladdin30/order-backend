@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     AUDIT_ENABLED: bool = True
     AUDIT_MUTATIONS_ONLY: bool = True
 
+    # Cryptographic QR Signature Engine
+    QR_KEY_VERSION: int = 1
+    QR_SECRET_KEY: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

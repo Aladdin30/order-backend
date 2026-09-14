@@ -1,11 +1,18 @@
 """FastAPI application initialization and middleware configuration."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.middleware.audit_middleware import AuditMiddleware
+from app.api.middleware.i18n_middleware import I18nMiddleware
 from app.api.v1 import api_v1_router
 from app.core.config import settings
+from app.core.exceptions import (
+    localized_http_exception_handler,
+    localized_validation_exception_handler,
+)
 
 
 def create_app() -> FastAPI:
@@ -28,6 +35,14 @@ def create_app() -> FastAPI:
 
     # Automated mutation and security audit interceptor
     application.add_middleware(AuditMiddleware)
+
+    # Internationalization and dynamic request locale middleware
+    application.add_middleware(I18nMiddleware)
+
+    # Global localized exception handlers
+    application.add_exception_handler(HTTPException, localized_http_exception_handler)
+    application.add_exception_handler(StarletteHTTPException, localized_http_exception_handler)
+    application.add_exception_handler(RequestValidationError, localized_validation_exception_handler)
 
     # API Routers
     application.include_router(api_v1_router, prefix=settings.API_V1_STR)
