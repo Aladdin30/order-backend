@@ -263,6 +263,7 @@ def test_domain_enums():
     assert UserRole.REGIONAL_MANAGER == "REGIONAL_MANAGER"
     assert UserRole.BRANCH_ADMIN == "BRANCH_ADMIN"
     assert UserRole.CASHIER == "CASHIER"
+    assert UserRole.WAITER == "WAITER"
     assert UserRole.KITCHEN_STAFF == "KITCHEN_STAFF"
 
     assert TableStatus.AVAILABLE == "AVAILABLE"
@@ -296,6 +297,8 @@ def test_domain_enums():
     assert ServiceRequestType.WAITER_CALL == "WAITER_CALL"
     assert ServiceRequestType.PACK_LEFTOVERS == "PACK_LEFTOVERS"
     assert ServiceRequestType.BILL_REQUEST == "BILL_REQUEST"
+    assert ServiceRequestType.TAKEAWAY_ORDER == "TAKEAWAY_ORDER"
+    assert ServiceRequestType.OTHER == "OTHER"
 
     assert ServiceRequestStatus.PENDING == "PENDING"
     assert ServiceRequestStatus.ACKNOWLEDGED == "ACKNOWLEDGED"
@@ -304,11 +307,14 @@ def test_domain_enums():
 
     assert PaymentMethod.CASH == "CASH"
     assert PaymentMethod.CARD_TERMINAL == "CARD_TERMINAL"
+    assert PaymentMethod.POS_TERMINAL == "POS_TERMINAL"
     assert PaymentMethod.STRIPE == "STRIPE"
+    assert PaymentMethod.ONLINE_CARD == "ONLINE_CARD"
     assert PaymentMethod.APPLE_PAY == "APPLE_PAY"
     assert PaymentMethod.LOCAL_WALLET == "LOCAL_WALLET"
 
     assert PaymentStatus.PENDING == "PENDING"
+    assert PaymentStatus.PENDING_CASHIER_VERIFICATION == "PENDING_CASHIER_VERIFICATION"
     assert PaymentStatus.COMPLETED == "COMPLETED"
     assert PaymentStatus.FAILED == "FAILED"
     assert PaymentStatus.REFUNDED == "REFUNDED"

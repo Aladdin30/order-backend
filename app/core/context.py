@@ -24,6 +24,11 @@ class SecurityContext:
     allowed_branch_ids: frozenset[uuid.UUID] = field(default_factory=frozenset)
 
     @property
+    def user_id(self) -> uuid.UUID:
+        """Convenience property for authenticated user's UUID."""
+        return self.user.id
+
+    @property
     def is_super_admin(self) -> bool:
         """Indicate whether the actor possesses tenant-wide administrative authority."""
         return self.role == UserRole.SUPER_ADMIN

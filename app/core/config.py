@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = _DEFAULT_SECRET_KEY
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    GUEST_SESSION_EXPIRE_MINUTES: int = 180
 
     # CORS
     BACKEND_CORS_ORIGINS: list[str] = ["*"]
@@ -54,6 +55,11 @@ class Settings(BaseSettings):
     TRUSTED_PROXIES: list[str] = ["127.0.0.1", "::1"]
     RATE_LIMIT_MAX_TRACKED_KEYS: int = 10_000
     RATE_LIMIT_CLEANUP_INTERVAL_SECONDS: float = 30.0
+
+    # Payment Gateway Configuration
+    STRIPE_SECRET_KEY: str = "sk_test_mock_secret"
+    STRIPE_WEBHOOK_SECRET: str = "whsec_mock_webhook_secret"
+    LOCAL_PAYMENT_WEBHOOK_SECRET: str = "local_hmac_webhook_secret"
 
     model_config = SettingsConfigDict(
         env_file=".env",

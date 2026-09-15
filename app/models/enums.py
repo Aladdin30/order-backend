@@ -10,6 +10,7 @@ class UserRole(StrEnum):
     REGIONAL_MANAGER = "REGIONAL_MANAGER"
     BRANCH_ADMIN = "BRANCH_ADMIN"
     CASHIER = "CASHIER"
+    WAITER = "WAITER"
     KITCHEN_STAFF = "KITCHEN_STAFF"
 
 
@@ -63,6 +64,8 @@ class ServiceRequestType(StrEnum):
     WAITER_CALL = "WAITER_CALL"
     PACK_LEFTOVERS = "PACK_LEFTOVERS"
     BILL_REQUEST = "BILL_REQUEST"
+    TAKEAWAY_ORDER = "TAKEAWAY_ORDER"
+    OTHER = "OTHER"
 
 
 class ServiceRequestStatus(StrEnum):
@@ -79,7 +82,9 @@ class PaymentMethod(StrEnum):
 
     CASH = "CASH"
     CARD_TERMINAL = "CARD_TERMINAL"
+    POS_TERMINAL = "POS_TERMINAL"
     STRIPE = "STRIPE"
+    ONLINE_CARD = "ONLINE_CARD"
     APPLE_PAY = "APPLE_PAY"
     LOCAL_WALLET = "LOCAL_WALLET"
 
@@ -88,6 +93,7 @@ class PaymentStatus(StrEnum):
     """Settlement status for transactions."""
 
     PENDING = "PENDING"
+    PENDING_CASHIER_VERIFICATION = "PENDING_CASHIER_VERIFICATION"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     REFUNDED = "REFUNDED"
