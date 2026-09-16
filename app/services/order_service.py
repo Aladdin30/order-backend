@@ -26,6 +26,7 @@ from app.schemas.order import (
 )
 from app.schemas.session import GuestSessionContext
 from app.services.audit_service import AuditLogger
+from app.services.station_routing_service import StationRoutingService
 
 # Standard VAT rate (15%)
 STANDARD_TAX_RATE = Decimal("0.15")
@@ -159,7 +160,8 @@ class OrderService:
                     Category.is_active.is_(True),
                 )
                 .options(
-                    selectinload(Item.category),
+                    selectinload(Item.kitchen_station),
+                    selectinload(Item.category).selectinload(Category.kitchen_station),
                     selectinload(Item.modifier_groups).selectinload(ModifierGroup.options),
                 )
             )
@@ -263,11 +265,17 @@ class OrderService:
             line_subtotal = unit_price * Decimal(item_input.quantity)
 
             # Category-driven station inheritance: item.station -> item.category.station -> HOT_KITCHEN
-            resolved_station = (
-                catalog_item.station
-                or (catalog_item.category.station if catalog_item.category else None)
-                or KitchenStation.HOT_KITCHEN
+            resolved_station = StationRoutingService.resolve_item_station(
+                catalog_item,
+                catalog_item.category,
             )
+            station_code_val = str(resolved_station.value if hasattr(resolved_station, "value") else resolved_station)
+            try:
+                legacy_enum_station = KitchenStation(station_code_val)
+            except ValueError:
+                legacy_enum_station = KitchenStation.HOT_KITCHEN
+
+            station_id_val = catalog_item.station_id or (catalog_item.category.station_id if catalog_item.category else None)
 
             order_item = OrderItem(
                 order_id=order.id,
@@ -275,7 +283,9 @@ class OrderService:
                 quantity=item_input.quantity,
                 unit_price=unit_price,
                 subtotal=line_subtotal,
-                station=resolved_station,
+                station=legacy_enum_station,
+                station_code=station_code_val,
+                station_id=station_id_val,
                 is_bumped=False,
                 selected_modifiers=selected_snapshots,
                 special_instructions=item_input.special_instructions,
@@ -335,6 +345,19 @@ class OrderService:
                 "is_reorder": is_reorder,
             },
         )
+
+        # 7. Real-Time KDS Station Decomposition Dispatch
+        # Directive 2: Route only newly added items on subsequent checkouts
+        if order_status in (OrderStatus.SUBMITTED, OrderStatus.PREPARING):
+            try:
+                await StationRoutingService.dispatch_order_to_kds(
+                    order,
+                    items=new_items,
+                    table_number=table.table_number,
+                )
+            except Exception as kds_exc:
+                import logging
+                logging.getLogger("app.services.order_service").warning("Failed to dispatch KDS sub-tickets: %s", kds_exc)
 
         return cls._build_order_response(
             order,
@@ -457,6 +480,21 @@ class OrderService:
                 "table_status": new_table_status.value if new_table_status else None,
             },
         )
+
+        # 6. Real-Time KDS Dispatch when order enters active kitchen lifecycle
+        if from_status in (OrderStatus.PENDING_STAFF_CONFIRMATION, OrderStatus.DRAFT) and target_status in (OrderStatus.SUBMITTED, OrderStatus.PREPARING):
+            try:
+                items_stmt = select(OrderItem).options(selectinload(OrderItem.item)).where(OrderItem.order_id == order.id)
+                items_res = await db.execute(items_stmt)
+                all_order_items = list(items_res.scalars().all())
+                await StationRoutingService.dispatch_order_to_kds(
+                    order,
+                    items=all_order_items,
+                    table_number=table.table_number if table else None,
+                )
+            except Exception as kds_exc:
+                import logging
+                logging.getLogger("app.services.order_service").warning("Failed to dispatch KDS tickets on transition: %s", kds_exc)
 
         return OrderTransitionResponse(
             order_id=order.id,

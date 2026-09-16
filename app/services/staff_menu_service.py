@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.catalog import Category, Item, ModifierGroup, ModifierOption
 from app.models.enums import OrderStatus
+from app.models.kitchen_station import KitchenStation
 from app.models.order import Order, OrderItem
 from app.schemas.staff_menu import (
     StaffCategoryCreate,
@@ -30,6 +31,10 @@ from app.schemas.staff_menu import (
     StaffModifierOptionUpdate,
 )
 from app.services.audit_service import AuditLogger
+from app.services.catalog_broadcast_service import (
+    broadcast_item_availability_change,
+    broadcast_modifier_availability_change,
+)
 
 OPEN_ORDER_STATUSES = [
     OrderStatus.SUBMITTED,
@@ -58,6 +63,17 @@ class StaffMenuService:
         payload: StaffCategoryCreate,
     ) -> StaffCategoryResponse:
         """Create a new menu category scoped to the authorized branch."""
+        if payload.station_id is not None:
+            st_stmt = select(KitchenStation).where(
+                KitchenStation.id == payload.station_id,
+                KitchenStation.branch_id == branch_id,
+            )
+            if (await db.execute(st_stmt)).scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Kitchen station '{payload.station_id}' not found within authorized branch.",
+                )
+
         now = datetime.datetime.now(datetime.timezone.utc)
         category = Category(
             id=uuid.uuid4(),
@@ -65,6 +81,7 @@ class StaffMenuService:
             name=payload.name,
             display_order=payload.display_order,
             station=payload.station,
+            station_id=payload.station_id,
             is_active=payload.is_active,
             created_at=now,
             updated_at=now,
@@ -119,6 +136,18 @@ class StaffMenuService:
         if payload.station is not None:
             category.station = payload.station
             changes["station"] = payload.station.value
+        if payload.station_id is not None:
+            st_stmt = select(KitchenStation).where(
+                KitchenStation.id == payload.station_id,
+                KitchenStation.branch_id == branch_id,
+            )
+            if (await db.execute(st_stmt)).scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Kitchen station '{payload.station_id}' not found within authorized branch.",
+                )
+            category.station_id = payload.station_id
+            changes["station_id"] = str(payload.station_id)
         if payload.is_active is not None:
             category.is_active = payload.is_active
             changes["is_active"] = payload.is_active
@@ -233,6 +262,18 @@ class StaffMenuService:
                 detail=f"Category '{payload.category_id}' not found within authorized branch.",
             )
 
+        resolved_station_id = payload.station_id if payload.station_id is not None else category.station_id
+        if resolved_station_id is not None:
+            st_stmt = select(KitchenStation).where(
+                KitchenStation.id == resolved_station_id,
+                KitchenStation.branch_id == branch_id,
+            )
+            if (await db.execute(st_stmt)).scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Kitchen station '{resolved_station_id}' not found within authorized branch.",
+                )
+
         now = datetime.datetime.now(datetime.timezone.utc)
         item = Item(
             id=uuid.uuid4(),
@@ -241,6 +282,7 @@ class StaffMenuService:
             description=payload.description,
             base_price=payload.base_price,
             station=payload.station or category.station,
+            station_id=resolved_station_id,
             image_url=payload.image_url,
             is_available=payload.is_available,
             allergens=payload.allergens,
@@ -317,6 +359,18 @@ class StaffMenuService:
         if payload.station is not None:
             item.station = payload.station
             changes["station"] = payload.station.value
+        if payload.station_id is not None:
+            st_stmt = select(KitchenStation).where(
+                KitchenStation.id == payload.station_id,
+                KitchenStation.branch_id == branch_id,
+            )
+            if (await db.execute(st_stmt)).scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Kitchen station '{payload.station_id}' not found within authorized branch.",
+                )
+            item.station_id = payload.station_id
+            changes["station_id"] = str(payload.station_id)
         if payload.image_url is not None:
             item.image_url = payload.image_url
             changes["image_url"] = payload.image_url
@@ -333,6 +387,13 @@ class StaffMenuService:
         item.updated_at = datetime.datetime.now(datetime.timezone.utc)
         await db.commit()
         await db.refresh(item)
+
+        if payload.is_available is not None:
+            await broadcast_item_availability_change(
+                branch_id=branch_id,
+                item_id=item.id,
+                is_available=item.is_available,
+            )
 
         await AuditLogger.log(
             tenant_id=tenant_id,
@@ -376,6 +437,12 @@ class StaffMenuService:
         await db.commit()
         await db.refresh(item)
 
+        await broadcast_item_availability_change(
+            branch_id=branch_id,
+            item_id=item.id,
+            is_available=is_available,
+        )
+
         action = "ITEM_RESTOCKED" if is_available else "ITEM_86_TRIGGERED"
         await AuditLogger.log(
             tenant_id=tenant_id,
@@ -418,6 +485,11 @@ class StaffMenuService:
             item.is_available = False
             item.updated_at = datetime.datetime.now(datetime.timezone.utc)
             await db.commit()
+            await broadcast_item_availability_change(
+                branch_id=branch_id,
+                item_id=item.id,
+                is_available=False,
+            )
             action = "ITEM_DEACTIVATED"
             message = "Item marked as unavailable (86'd)."
         else:
@@ -571,6 +643,68 @@ class StaffMenuService:
         return StaffModifierOptionResponse.model_validate(option)
 
     @classmethod
+    async def update_modifier_option(
+        cls,
+        db: AsyncSession,
+        branch_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_role: str,
+        option_id: uuid.UUID,
+        payload: StaffModifierOptionUpdate,
+    ) -> StaffModifierOptionResponse:
+        """Update modifier option attributes (name, price_delta, is_available)."""
+        stmt = (
+            select(ModifierOption)
+            .join(ModifierGroup, ModifierOption.modifier_group_id == ModifierGroup.id)
+            .join(Item, ModifierGroup.item_id == Item.id)
+            .join(Category, Item.category_id == Category.id)
+            .where(ModifierOption.id == option_id, Category.branch_id == branch_id)
+        )
+        option = (await db.execute(stmt)).scalar_one_or_none()
+        if not option:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Modifier option '{option_id}' not found within authorized branch.",
+            )
+
+        changes: dict[str, Any] = {}
+        if payload.name is not None:
+            option.name = payload.name
+            changes["name"] = payload.name
+        if payload.price_delta is not None:
+            option.price_delta = payload.price_delta
+            changes["price_delta"] = str(payload.price_delta)
+        if payload.is_available is not None:
+            option.is_available = payload.is_available
+            changes["is_available"] = payload.is_available
+
+        option.updated_at = datetime.datetime.now(datetime.timezone.utc)
+        await db.commit()
+        await db.refresh(option)
+
+        if payload.is_available is not None:
+            await broadcast_modifier_availability_change(
+                branch_id=branch_id,
+                modifier_option_id=option.id,
+                group_id=option.modifier_group_id,
+                is_available=option.is_available,
+            )
+
+        await AuditLogger.log(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            user_id=actor_id,
+            actor_role=actor_role,
+            action="MODIFIER_OPTION_UPDATED",
+            resource_type="modifier_option",
+            resource_id=str(option.id),
+            changes=changes,
+        )
+
+        return StaffModifierOptionResponse.model_validate(option)
+
+    @classmethod
     async def set_option_availability(
         cls,
         db: AsyncSession,
@@ -600,6 +734,13 @@ class StaffMenuService:
         option.updated_at = datetime.datetime.now(datetime.timezone.utc)
         await db.commit()
         await db.refresh(option)
+
+        await broadcast_modifier_availability_change(
+            branch_id=branch_id,
+            modifier_option_id=option.id,
+            group_id=option.modifier_group_id,
+            is_available=is_available,
+        )
 
         action = "MODIFIER_OPTION_RESTOCKED" if is_available else "MODIFIER_OPTION_86_TRIGGERED"
         await AuditLogger.log(

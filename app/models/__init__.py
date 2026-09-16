@@ -15,6 +15,7 @@ from app.models.enums import (
     TableStatus,
     UserRole,
 )
+from app.models.kitchen_station import KitchenStation as KitchenStationModel
 from app.models.order import Order, OrderItem, Payment
 from app.models.service import Review, ServiceRequest
 
@@ -24,6 +25,7 @@ __all__ = [
     "LocalizedText",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",
+    "KitchenStationModel",
     # Enums
     "UserRole",
     "TableStatus",

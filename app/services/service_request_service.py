@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.i18n import SupportedLocale, get_localized_message
+from app.core.redis_pubsub import redis_pubsub
 from app.models.auth import Table
 from app.models.enums import ServiceRequestStatus, ServiceRequestType
 from app.models.service import ServiceRequest
@@ -68,7 +69,9 @@ def build_service_request_response(
         request_type=req.request_type,
         status=req.status,
         note=req.note,
-        escalated=req.escalated,
+        escalated=getattr(req, "is_escalated", getattr(req, "escalated", False)),
+        is_escalated=getattr(req, "is_escalated", getattr(req, "escalated", False)),
+        escalated_at=getattr(req, "escalated_at", None),
         created_at=req.created_at,
         acknowledged_at=req.acknowledged_at,
         completed_at=req.completed_at,
@@ -159,7 +162,7 @@ class ServiceRequestService:
                 request_type=payload.request_type,
                 status=ServiceRequestStatus.PENDING,
                 note=payload.note,
-                escalated=False,
+                is_escalated=False,
                 created_at=now,
                 updated_at=now,
             )
@@ -169,6 +172,24 @@ class ServiceRequestService:
             response = build_service_request_response(new_request, table_number=session.table_number)
 
             await db.commit()
+
+        # 4. Broadcast real-time event to floor runners and staff (strictly post-commit)
+        runners_channel = f"branch_{session.branch_id}_runners"
+        created_event_data = {
+            "request_id": str(new_request.id),
+            "table_number": session.table_number or (table.table_number if table else ""),
+            "type": new_request.request_type.value,
+            "notes": new_request.note,
+            "created_at": (new_request.created_at or now).isoformat(),
+        }
+        try:
+            await redis_pubsub.publish(
+                channel=runners_channel,
+                event_type="SERVICE_REQUEST_CREATED",
+                data=created_event_data,
+            )
+        except Exception as exc:
+            logger.warning("Failed to broadcast SERVICE_REQUEST_CREATED: %s", exc)
 
         # 4. Audit Log
         await AuditLogger.log(
@@ -293,6 +314,25 @@ class ServiceRequestService:
 
         await db.commit()
 
+        # Real-time event broadcast to runners and table channels (strictly post-commit)
+        update_event_data = {
+            "request_id": str(req.id),
+            "status": target_status.value,
+            "resolved_by": str(actor_id) if actor_id else None,
+        }
+        for target_channel in [
+            f"branch_{branch_id}_runners",
+            f"branch_{branch_id}_table_{req.table_id}",
+        ]:
+            try:
+                await redis_pubsub.publish(
+                    channel=target_channel,
+                    event_type="SERVICE_REQUEST_UPDATED",
+                    data=update_event_data,
+                )
+            except Exception as exc:
+                logger.warning("Failed to broadcast SERVICE_REQUEST_UPDATED to %s: %s", target_channel, exc)
+
         # Audit Log
         await AuditLogger.log(
             tenant_id=tenant_id,
@@ -314,3 +354,49 @@ class ServiceRequestService:
         )
 
         return response
+
+    @classmethod
+    async def acknowledge_request(
+        cls,
+        db: AsyncSession,
+        request_id: uuid.UUID,
+        branch_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_role: str,
+        locale: SupportedLocale | None = None,
+    ) -> ServiceRequestResponse:
+        """Floor staff or dispatcher acknowledges a pending service request."""
+        return await cls.transition_status(
+            db=db,
+            request_id=request_id,
+            branch_id=branch_id,
+            tenant_id=tenant_id,
+            target_status=ServiceRequestStatus.ACKNOWLEDGED,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            locale=locale,
+        )
+
+    @classmethod
+    async def resolve_request(
+        cls,
+        db: AsyncSession,
+        request_id: uuid.UUID,
+        branch_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        actor_role: str,
+        locale: SupportedLocale | None = None,
+    ) -> ServiceRequestResponse:
+        """Floor staff completes / resolves an active service request."""
+        return await cls.transition_status(
+            db=db,
+            request_id=request_id,
+            branch_id=branch_id,
+            tenant_id=tenant_id,
+            target_status=ServiceRequestStatus.COMPLETED,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            locale=locale,
+        )

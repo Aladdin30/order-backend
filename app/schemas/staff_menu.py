@@ -29,6 +29,7 @@ class StaffCategoryCreate(BaseModel):
         default=KitchenStation.HOT_KITCHEN,
         description="Kitchen fulfillment station",
     )
+    station_id: uuid.UUID | None = Field(default=None, description="Optional custom dynamic kitchen station ID")
     is_active: bool = Field(default=True, description="Whether category is active and visible")
 
 
@@ -38,6 +39,7 @@ class StaffCategoryUpdate(BaseModel):
     name: dict[str, str] | None = Field(default=None, description="Updated bilingual name")
     display_order: int | None = Field(default=None, ge=0, description="Updated sequence order")
     station: KitchenStation | None = Field(default=None, description="Updated fulfillment station")
+    station_id: uuid.UUID | None = Field(default=None, description="Updated dynamic kitchen station ID")
     is_active: bool | None = Field(default=None, description="Updated active status")
 
 
@@ -49,6 +51,7 @@ class StaffCategoryResponse(BaseModel):
     name: dict[str, str]
     display_order: int
     station: KitchenStation
+    station_id: uuid.UUID | None = None
     is_active: bool
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -79,6 +82,7 @@ class StaffItemCreate(BaseModel):
         default=None,
         description="Target kitchen station override (inherits from category if None)",
     )
+    station_id: uuid.UUID | None = Field(default=None, description="Optional custom dynamic kitchen station ID")
     image_url: str | None = Field(default=None, max_length=1024, description="CDN image URL")
     is_available: bool = Field(
         default=True,
@@ -96,6 +100,7 @@ class StaffItemUpdate(BaseModel):
     description: dict[str, str] | None = Field(default=None, description="Updated bilingual description")
     base_price: Decimal | None = Field(default=None, ge=Decimal("0.00"), description="Updated base price")
     station: KitchenStation | None = Field(default=None, description="Updated kitchen station")
+    station_id: uuid.UUID | None = Field(default=None, description="Updated dynamic kitchen station ID")
     image_url: str | None = Field(default=None, max_length=1024, description="Updated image URL")
     is_available: bool | None = Field(default=None, description="Item 86 toggle")
     allergens: list[str] | None = Field(default=None, description="Updated allergens")
@@ -120,6 +125,7 @@ class StaffItemResponse(BaseModel):
     description: dict[str, str] | None = None
     base_price: Decimal
     station: KitchenStation | None = None
+    station_id: uuid.UUID | None = None
     image_url: str | None = None
     is_available: bool
     allergens: list[str]

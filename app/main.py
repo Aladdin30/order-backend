@@ -1,4 +1,4 @@
-"""FastAPI application initialization and middleware configuration."""
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -9,11 +9,30 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.middleware.audit_middleware import AuditMiddleware
 from app.api.middleware.i18n_middleware import I18nMiddleware
 from app.api.v1 import api_v1_router
+from app.api.v1.websocket import websocket_gateway
 from app.core.config import settings
 from app.core.exceptions import (
     localized_http_exception_handler,
     localized_validation_exception_handler,
 )
+from app.core.redis_pubsub import redis_pubsub
+from app.core.websocket_manager import ws_manager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application startup and shutdown lifecycle hooks."""
+    # Startup: Initialize Redis Pub/Sub listener bridge
+    await redis_pubsub.start(ws_manager)
+    if settings.SLA_MONITOR_ENABLED:
+        from app.services.sla_monitor_service import sla_monitor
+        await sla_monitor.start()
+    yield
+    # Shutdown: Cleanly stop background tasks and close Redis Pub/Sub connections
+    if settings.SLA_MONITOR_ENABLED:
+        from app.services.sla_monitor_service import sla_monitor
+        await sla_monitor.stop()
+    await redis_pubsub.stop()
 
 
 def create_app() -> FastAPI:
@@ -23,6 +42,7 @@ def create_app() -> FastAPI:
         openapi_url=f"{settings.API_V1_STR}/openapi.json",
         docs_url=f"{settings.API_V1_STR}/docs",
         redoc_url=f"{settings.API_V1_STR}/redoc",
+        lifespan=lifespan,
     )
 
     # CORS configuration
@@ -48,6 +68,7 @@ def create_app() -> FastAPI:
 
     # API Routers
     application.include_router(api_v1_router, prefix=settings.API_V1_STR)
+    application.add_api_websocket_route("/ws", websocket_gateway)
 
     @application.get("/health", tags=["system"], summary="Service Health Check")
     async def health_check() -> dict[str, str]:
@@ -65,9 +86,12 @@ def create_app() -> FastAPI:
         except Exception:
             db_status = "unavailable"
 
+        redis_status = "connected" if redis_pubsub._is_connected else "offline"
+
         return {
             "status": "ready" if db_status == "connected" else "degraded",
             "database": db_status,
+            "redis": redis_status,
             "service": settings.PROJECT_NAME,
         }
 

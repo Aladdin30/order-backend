@@ -24,6 +24,7 @@ from app.schemas.staff_menu import (
     StaffModifierOptionAvailabilityUpdate,
     StaffModifierOptionCreate,
     StaffModifierOptionResponse,
+    StaffModifierOptionUpdate,
 )
 from app.services.staff_menu_service import StaffMenuService
 
@@ -316,6 +317,34 @@ async def create_modifier_option(
         actor_id=context.user.id,
         actor_role=context.role.value,
         group_id=group_id,
+        payload=payload,
+    )
+
+
+@router.patch(
+    "/modifier-options/{option_id}",
+    response_model=StaffModifierOptionResponse,
+    summary="Update Modifier Option",
+    description="Update modifier option attributes (name, price_delta, is_available).",
+)
+async def update_modifier_option(
+    option_id: uuid.UUID,
+    payload: StaffModifierOptionUpdate,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+    context: Annotated[
+        SecurityContext,
+        Depends(RequireRoles([UserRole.BRANCH_ADMIN, UserRole.SUPER_ADMIN])),
+    ],
+    branch_id: Annotated[uuid.UUID, Depends(EnforceBranchAccess())],
+) -> StaffModifierOptionResponse:
+    """Update modifier option attributes within authorized branch."""
+    return await StaffMenuService.update_modifier_option(
+        db=db,
+        branch_id=branch_id,
+        tenant_id=context.tenant_id,
+        actor_id=context.user.id,
+        actor_role=context.role.value,
+        option_id=option_id,
         payload=payload,
     )
 

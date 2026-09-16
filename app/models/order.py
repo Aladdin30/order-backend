@@ -133,8 +133,16 @@ class OrderItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     quantity: Mapped[int] = mapped_column(SmallInteger, default=1, nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    station_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("kitchen_stations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    station_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     station: Mapped[KitchenStation] = mapped_column(
         SAEnum(KitchenStation, name="kitchen_station", native_enum=True),
+        default=KitchenStation.HOT_KITCHEN,
         nullable=False,
     )
     is_bumped: Mapped[bool] = mapped_column(

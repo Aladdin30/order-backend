@@ -50,17 +50,18 @@ from app.models import (
 def test_mapper_compilation():
     """Verify that all SQLAlchemy 2.0 mappers configure without circular import or typing errors."""
     configure_mappers()
-    assert len(Base.metadata.tables) == 15
+    assert len(Base.metadata.tables) == 16
 
 
 def test_table_registration():
-    """Verify all 15 domain and audit tables are properly registered in Base.metadata."""
+    """Verify all 16 domain and audit tables are properly registered in Base.metadata."""
     expected_tables = {
         "tenants",
         "branches",
         "users",
         "user_branch_access",
         "tables",
+        "kitchen_stations",
         "categories",
         "items",
         "modifier_groups",
@@ -494,10 +495,11 @@ def test_alembic_metadata_auto_detection():
     # Import target_metadata directly as done in env.py
     from app.models import Base as AppBase
 
-    assert len(AppBase.metadata.tables) == 15
+    assert len(AppBase.metadata.tables) == 16
     assert "orders" in AppBase.metadata.tables
     assert "branches" in AppBase.metadata.tables
     assert "audit_logs" in AppBase.metadata.tables
+    assert "kitchen_stations" in AppBase.metadata.tables
 
 
 def test_postgresql_ddl_generation():

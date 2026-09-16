@@ -18,7 +18,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.enums import ServiceRequestStatus, ServiceRequestType
@@ -55,7 +55,12 @@ class ServiceRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
     note: Mapped[str | None] = mapped_column(String(255), default=None, nullable=True)
-    escalated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_escalated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    escalated_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        default=None,
+        nullable=True,
+    )
     acknowledged_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True),
         default=None,
@@ -72,8 +77,11 @@ class ServiceRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
     )
 
+    escalated = synonym("is_escalated")
+
     __table_args__ = (
         Index("ix_service_requests_branch_status", "branch_id", "status"),
+        Index("ix_service_requests_sla_pending", "status", "is_escalated", "created_at"),
     )
 
     # Relationships

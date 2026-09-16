@@ -24,6 +24,7 @@ from app.models.enums import TableStatus, UserRole
 
 if TYPE_CHECKING:
     from app.models.catalog import Category
+    from app.models.kitchen_station import KitchenStation
     from app.models.order import Order, Payment
     from app.models.service import Review, ServiceRequest
 
@@ -119,6 +120,12 @@ class Branch(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     reviews: Mapped[list[Review]] = relationship(
         "Review",
+        back_populates="branch",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    kitchen_stations: Mapped[list[KitchenStation]] = relationship(
+        "KitchenStation",
         back_populates="branch",
         cascade="all, delete-orphan",
         passive_deletes=True,

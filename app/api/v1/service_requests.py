@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -125,3 +126,28 @@ async def update_service_request_status(
         actor_role=context.role.value,
         locale=locale,
     )
+
+
+@router.post(
+    "/sla/escalate-overdue",
+    summary="Trigger SLA check and escalate overdue service requests",
+)
+async def trigger_sla_escalation(
+    context: SecurityContext = Depends(
+        RequireRoles([UserRole.BRANCH_ADMIN, UserRole.SUPER_ADMIN])
+    ),
+    db: AsyncSession = Depends(get_async_db),
+    threshold_seconds: int = Query(default=180, ge=5, le=86400),
+) -> dict[str, Any]:
+    """Staff administrator triggers background SLA escalation check."""
+    from app.services.sla_monitor_service import check_and_escalate_overdue_requests
+
+    escalated_count = await check_and_escalate_overdue_requests(
+        db=db,
+        threshold_seconds=threshold_seconds,
+    )
+    return {
+        "status": "success",
+        "escalated_count": escalated_count,
+        "threshold_seconds": threshold_seconds,
+    }
