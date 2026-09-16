@@ -38,6 +38,12 @@ class Category(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     name: Mapped[LocalizedText] = mapped_column(JSONB, nullable=False)
     display_order: Mapped[int] = mapped_column(SmallInteger, default=0, nullable=False)
+    station: Mapped[KitchenStation] = mapped_column(
+        SAEnum(KitchenStation, name="kitchen_station", native_enum=True),
+        default=KitchenStation.HOT_KITCHEN,
+        server_default="HOT_KITCHEN",
+        nullable=False,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Relationships
@@ -64,9 +70,10 @@ class Item(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     name: Mapped[LocalizedText] = mapped_column(JSONB, nullable=False)
     description: Mapped[LocalizedText | None] = mapped_column(JSONB, nullable=True)
     base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
-    station: Mapped[KitchenStation] = mapped_column(
+    station: Mapped[KitchenStation | None] = mapped_column(
         SAEnum(KitchenStation, name="kitchen_station", native_enum=True),
-        nullable=False,
+        default=None,
+        nullable=True,
     )
     image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     is_available: Mapped[bool] = mapped_column(

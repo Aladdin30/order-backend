@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     Boolean,
+    DateTime,
     Enum as SAEnum,
     ForeignKey,
     Index,
@@ -82,6 +84,7 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=Decimal("0.00"),
         nullable=False,
     )
+    is_paid: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     customer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
@@ -158,6 +161,18 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     __tablename__ = "payments"
 
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("branches.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     order_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="RESTRICT"),
@@ -175,13 +190,24 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=PaymentStatus.PENDING,
         nullable=False,
     )
-    transaction_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    transaction_reference: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
     verified_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
+    verified_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        default=None,
+        nullable=True,
+    )
+
+    @property
+    def method(self) -> PaymentMethod:
+        """Alias for payment_method."""
+        return self.payment_method
 
     # Relationships
     order: Mapped[Order] = relationship("Order", back_populates="payments")

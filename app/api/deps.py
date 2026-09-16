@@ -175,3 +175,24 @@ class EnforceBranchAccess:
         context.assert_branch_access(branch_id)
         request.state.branch_id = branch_id
         return branch_id
+
+
+# Re-export guest session dependencies
+from app.api.deps_session import (  # noqa: E402
+    GuestSessionContext,
+    RequirePresenceVerified,
+    get_current_guest_session,
+    require_presence_verified,
+)
+
+__all__ = [
+    "get_async_db",
+    "get_current_user_context",
+    "RequireRoles",
+    "EnforceBranchAccess",
+    "get_current_guest_session",
+    "require_presence_verified",
+    "RequirePresenceVerified",
+    "GuestSessionContext",
+]
+

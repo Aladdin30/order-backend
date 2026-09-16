@@ -138,6 +138,10 @@ SYSTEM_MESSAGES: dict[str, dict[SupportedLocale, str]] = {
         SupportedLocale.AR: "انتهت صلاحية الرمز",
         SupportedLocale.EN: "Token has expired",
     },
+    "SESSION_TERMINATED_TABLE_AVAILABLE": {
+        SupportedLocale.AR: "انتهت جلسة الطاولة وأصبحت الطاولة متاحة لضيوف جدد",
+        SupportedLocale.EN: "Table session has terminated and the table is now available",
+    },
     "INPUT_VALIDATION_FAILED": {
         SupportedLocale.AR: "بيانات الطلب المدخلة غير صحيحة",
         SupportedLocale.EN: "Input validation failed",
@@ -145,6 +149,106 @@ SYSTEM_MESSAGES: dict[str, dict[SupportedLocale, str]] = {
     "INTERNAL_SERVER_ERROR": {
         SupportedLocale.AR: "حدث خطأ غير متوقع في النظام",
         SupportedLocale.EN: "An unexpected internal error occurred",
+    },
+    "ITEM_UNAVAILABLE": {
+        SupportedLocale.AR: "العنصر المطلوب غير متوفر حالياً",
+        SupportedLocale.EN: "The requested item is currently unavailable",
+    },
+    "ITEM_NOT_FOUND": {
+        SupportedLocale.AR: "عنصر القائمة المطلوب غير موجود",
+        SupportedLocale.EN: "The requested menu item was not found",
+    },
+    "MODIFIER_GROUP_REQUIRED": {
+        SupportedLocale.AR: "مجموعة التعديلات هذه مطلوبة ويجب اختيار خيار واحد على الأقل",
+        SupportedLocale.EN: "This modifier group is required; at least one option must be selected",
+    },
+    "MODIFIER_SELECTION_OUT_OF_BOUNDS": {
+        SupportedLocale.AR: "عدد الخيارات المحددة خارج النطاق المسموح به للمجموعة",
+        SupportedLocale.EN: "The number of selected options is out of the allowed bounds for this group",
+    },
+    "MODIFIER_OPTION_INVALID": {
+        SupportedLocale.AR: "خيار التعديل المحدد غير صالح أو لا ينتمي لهذا العنصر",
+        SupportedLocale.EN: "The selected modifier option is invalid or does not belong to this item",
+    },
+    "MODIFIER_OPTION_UNAVAILABLE": {
+        SupportedLocale.AR: "خيار التعديل المحدد غير متوفر حالياً",
+        SupportedLocale.EN: "The selected modifier option is currently unavailable",
+    },
+    "DUPLICATE_MODIFIER_OPTION": {
+        SupportedLocale.AR: "لا يمكن تكرار نفس خيار التعديل في نفس المجموعة",
+        SupportedLocale.EN: "Duplicate modifier option selections are not allowed",
+    },
+    "DUPLICATE_MODIFIER_GROUP": {
+        SupportedLocale.AR: "لا يمكن تكرار تقديم نفس مجموعة التعديلات",
+        SupportedLocale.EN: "Duplicate modifier group selections are not allowed",
+    },
+    "INVALID_STATE_TRANSITION": {
+        SupportedLocale.AR: "الانتقال بين حالات الطلب غير صالح",
+        SupportedLocale.EN: "Invalid order status transition",
+    },
+    "CANCELLATION_RESTRICTED_TO_STAFF": {
+        SupportedLocale.AR: "لا يمكن إلغاء الطلب بعد اعتماده إلا من قبل مسؤول الفرع",
+        SupportedLocale.EN: "Orders in progress can only be cancelled by a branch administrator",
+    },
+    "CANCELLATION_REASON_REQUIRED": {
+        SupportedLocale.AR: "سبب الإلغاء مطلوب",
+        SupportedLocale.EN: "A cancellation reason is required",
+    },
+    "NO_ACTIVE_ORDER": {
+        SupportedLocale.AR: "لا يوجد طلب نشط لهذه الطاولة",
+        SupportedLocale.EN: "No active order found for this table",
+    },
+    "ORDER_NOT_FOUND": {
+        SupportedLocale.AR: "الطلب غير موجود",
+        SupportedLocale.EN: "The requested order was not found",
+    },
+    "EMPTY_ORDER": {
+        SupportedLocale.AR: "لا يمكن تقديم طلب فارغ بدون عناصر",
+        SupportedLocale.EN: "Cannot checkout an empty order without items",
+    },
+    "ACTIVE_REQUEST_EXISTS": {
+        SupportedLocale.AR: "يوجد طلب خدمة نشط من هذا النوع مسبقاً لهذه الطاولة",
+        SupportedLocale.EN: "An active service request of this type already exists for this table",
+    },
+    "SERVICE_REQUEST_COOLDOWN": {
+        SupportedLocale.AR: "يرجى الانتظار 60 ثانية قبل إرسال طلب خدمة آخر من هذا النوع",
+        SupportedLocale.EN: "Please wait 60 seconds before submitting another service request of this type",
+    },
+    "SERVICE_REQUEST_NOT_FOUND": {
+        SupportedLocale.AR: "طلب الخدمة غير موجود",
+        SupportedLocale.EN: "The requested service request was not found",
+    },
+    "INVALID_SERVICE_REQUEST_TRANSITION": {
+        SupportedLocale.AR: "تغيير حالة طلب الخدمة غير صالح",
+        SupportedLocale.EN: "Invalid service request status transition",
+    },
+    "ORDER_ALREADY_PAID": {
+        SupportedLocale.AR: "تم سداد قيمة هذا الطلب بالكامل مسبقاً",
+        SupportedLocale.EN: "This order has already been fully settled",
+    },
+    "PAYMENT_AMOUNT_INVALID": {
+        SupportedLocale.AR: "مبلغ السداد غير صالح أو يتجاوز الرصيد المتبقي",
+        SupportedLocale.EN: "Payment amount must be greater than zero and cannot exceed the pending balance",
+    },
+    "PAYMENT_NOT_FOUND": {
+        SupportedLocale.AR: "عملية الدفع غير موجودة",
+        SupportedLocale.EN: "The requested payment transaction was not found",
+    },
+    "PAYMENT_ALREADY_SETTLED": {
+        SupportedLocale.AR: "عملية الدفع تمت تسويتها مسبقاً",
+        SupportedLocale.EN: "This payment transaction is already settled",
+    },
+    "INVALID_WEBHOOK_SIGNATURE": {
+        SupportedLocale.AR: "توقيع الويب هوك غير صالح",
+        SupportedLocale.EN: "Invalid webhook cryptographic signature",
+    },
+    "ACTIVE_OFFLINE_PAYMENT_EXISTS": {
+        SupportedLocale.AR: "يوجد طلب سداد نقدي أو عبر نقطة البيع قيد المعالجة مسبقاً لهذه الطاولة",
+        SupportedLocale.EN: "A pending cash/POS settlement request already exists for this table",
+    },
+    "ORDER_CANCELLED_CANNOT_PAY": {
+        SupportedLocale.AR: "لا يمكن سداد طلب تم إلغاؤه",
+        SupportedLocale.EN: "Cannot process payment for a cancelled order",
     },
 }
 

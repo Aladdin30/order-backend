@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     SmallInteger,
+    String,
     Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -53,13 +54,21 @@ class ServiceRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=ServiceRequestStatus.PENDING,
         nullable=False,
     )
+    note: Mapped[str | None] = mapped_column(String(255), default=None, nullable=True)
     escalated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     acknowledged_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True),
+        default=None,
         nullable=True,
     )
     completed_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True),
+        default=None,
+        nullable=True,
+    )
+    dismissed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        default=None,
         nullable=True,
     )
 
