@@ -53,6 +53,24 @@ def create_app() -> FastAPI:
     async def health_check() -> dict[str, str]:
         return {"status": "healthy", "service": settings.PROJECT_NAME}
 
+    @application.get("/health/ready", tags=["system"], summary="Service Readiness Check")
+    async def readiness_check() -> dict[str, str]:
+        try:
+            from sqlalchemy import text
+            from app.core.database import async_session_factory
+
+            async with async_session_factory() as session:
+                await session.execute(text("SELECT 1"))
+            db_status = "connected"
+        except Exception:
+            db_status = "unavailable"
+
+        return {
+            "status": "ready" if db_status == "connected" else "degraded",
+            "database": db_status,
+            "service": settings.PROJECT_NAME,
+        }
+
     @application.get("/", include_in_schema=False)
     async def root_redirect() -> RedirectResponse:
         return RedirectResponse(url=f"{settings.API_V1_STR}/docs")
