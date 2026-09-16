@@ -59,6 +59,8 @@ class ServiceRequestResponse(BaseModel):
     status: ServiceRequestStatus
     note: str | None = None
     escalated: bool = False
+    is_escalated: bool = False
+    escalated_at: datetime.datetime | None = None
     created_at: datetime.datetime
     acknowledged_at: datetime.datetime | None = None
     completed_at: datetime.datetime | None = None

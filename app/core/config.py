@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/order_backend"
     SYNC_DATABASE_URL: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/order_backend"
 
+    # Redis Configuration
+    REDIS_URL: str = "redis://localhost:6379/0"
+
     # Audit Logging
     AUDIT_ENABLED: bool = True
     AUDIT_MUTATIONS_ONLY: bool = True
@@ -60,6 +63,11 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: str = "sk_test_mock_secret"
     STRIPE_WEBHOOK_SECRET: str = "whsec_mock_webhook_secret"
     LOCAL_PAYMENT_WEBHOOK_SECRET: str = "local_hmac_webhook_secret"
+
+    # Quick-Service SLA Monitor Engine (BE-3.4)
+    SLA_MONITOR_ENABLED: bool = False
+    SLA_MONITOR_INTERVAL_SECONDS: int = 15
+    SLA_TIMEOUT_SECONDS: int = 180
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -22,6 +22,7 @@ from app.models.enums import KitchenStation
 
 if TYPE_CHECKING:
     from app.models.auth import Branch
+    from app.models.kitchen_station import KitchenStation as KitchenStationRecord
     from app.models.order import OrderItem
 
 
@@ -38,6 +39,12 @@ class Category(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     name: Mapped[LocalizedText] = mapped_column(JSONB, nullable=False)
     display_order: Mapped[int] = mapped_column(SmallInteger, default=0, nullable=False)
+    station_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("kitchen_stations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     station: Mapped[KitchenStation] = mapped_column(
         SAEnum(KitchenStation, name="kitchen_station", native_enum=True),
         default=KitchenStation.HOT_KITCHEN,
@@ -48,6 +55,11 @@ class Category(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Relationships
     branch: Mapped[Branch] = relationship("Branch", back_populates="categories")
+    kitchen_station: Mapped[KitchenStationRecord | None] = relationship(
+        "KitchenStation",
+        foreign_keys=[station_id],
+        back_populates="categories",
+    )
     items: Mapped[list[Item]] = relationship(
         "Item",
         back_populates="category",
@@ -70,6 +82,12 @@ class Item(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     name: Mapped[LocalizedText] = mapped_column(JSONB, nullable=False)
     description: Mapped[LocalizedText | None] = mapped_column(JSONB, nullable=True)
     base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    station_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("kitchen_stations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     station: Mapped[KitchenStation | None] = mapped_column(
         SAEnum(KitchenStation, name="kitchen_station", native_enum=True),
         default=None,
@@ -95,6 +113,11 @@ class Item(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Relationships
     category: Mapped[Category] = relationship("Category", back_populates="items")
+    kitchen_station: Mapped[KitchenStationRecord | None] = relationship(
+        "KitchenStation",
+        foreign_keys=[station_id],
+        back_populates="items",
+    )
     modifier_groups: Mapped[list[ModifierGroup]] = relationship(
         "ModifierGroup",
         back_populates="item",
