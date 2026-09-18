@@ -33,11 +33,17 @@ class SecurityContext:
         """Indicate whether the actor possesses tenant-wide administrative authority."""
         return self.role == UserRole.SUPER_ADMIN
 
+    @property
+    def is_brand_admin(self) -> bool:
+        """Indicate whether the actor possesses brand-wide administrative authority."""
+        return self.role == UserRole.BRAND_ADMIN
+
     def can_access_branch(self, branch_id: uuid.UUID) -> bool:
         """Determine whether the actor has access rights to the specified branch."""
-        if self.is_super_admin:
+        if self.is_super_admin or self.is_brand_admin:
             return True
         return branch_id in self.allowed_branch_ids
+
 
     def assert_branch_access(self, branch_id: uuid.UUID) -> None:
         """Assert branch permission or raise HTTP 403 Forbidden."""
