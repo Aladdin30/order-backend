@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import EnforceBranchAccess, get_async_db, require_roles
-from app.models.auth import Table, User
+from app.models.auth import Branch, Table, User
 from app.models.enums import UserRole
 from app.schemas.qr_export import (
     BatchQRExportRequest,
@@ -174,10 +174,15 @@ async def verify_qr_signature(
         )
 
     # 2. Confirm table existence and active state
-    stmt = select(Table).where(
-        Table.id == table_id,
-        Table.branch_id == branch_id,
-        Table.is_active.is_(True),
+    stmt = (
+        select(Table)
+        .join(Branch, Table.branch_id == Branch.id)
+        .where(
+            Table.id == table_id,
+            Table.branch_id == branch_id,
+            Table.is_active.is_(True),
+            Branch.is_active.is_(True),
+        )
     )
     result = await db.execute(stmt)
     table = result.scalar_one_or_none()

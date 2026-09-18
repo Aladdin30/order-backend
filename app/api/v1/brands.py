@@ -33,7 +33,7 @@ def _assert_brand_access(context: SecurityContext, brand_id: uuid.UUID) -> None:
         return
     if context.role == UserRole.BRAND_ADMIN:
         user_brand_id = getattr(context.user, "brand_id", None)
-        if user_brand_id is not None and user_brand_id != brand_id:
+        if user_brand_id is None or user_brand_id != brand_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="ACCESS_FORBIDDEN_BRAND_MISMATCH",

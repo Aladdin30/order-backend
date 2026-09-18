@@ -125,8 +125,21 @@ class MenuService:
                 detail="ITEM_NOT_FOUND",
             )
 
-        # 2. Check Item 86 availability
-        if not item.is_available:
+        # 2. Check branch-level override for 86 and scope
+        override_stmt = select(BranchMenuOverride).where(
+            BranchMenuOverride.branch_id == branch_id,
+            BranchMenuOverride.menu_item_id == item.id,
+        )
+        override = (await db.execute(override_stmt)).scalar_one_or_none()
+
+        if item.scope == MenuItemScope.SPECIFIC_BRANCHES and override is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="ITEM_NOT_PERMITTED_FOR_BRANCH",
+            )
+
+        effective_available = override.is_available if override is not None else item.is_available
+        if not effective_available:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="ITEM_UNAVAILABLE",
@@ -227,7 +240,10 @@ class MenuService:
                 )
 
         # 6. Authoritative price computation
-        base_price = Decimal(str(item.base_price))
+        if override is not None and override.price_override is not None:
+            base_price = Decimal(str(override.price_override))
+        else:
+            base_price = Decimal(str(item.base_price))
         unit_price = base_price + total_modifier_delta
         subtotal = unit_price * Decimal(payload.quantity)
 
@@ -346,7 +362,7 @@ class MenuService:
                     is_available=bool(effective_available),
                     is_visible=bool(effective_visible),
                     has_override=override is not None,
-                    price_override=override.price_override if override else None,
+                    price_override=override.price_override if (override is not None and override.price_override is not None) else None,
                     image_url=item.image_url,
                     allergens=item.allergens or [],
                     dietary_badges=item.dietary_badges or [],

@@ -8,8 +8,9 @@ import uuid
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -62,29 +63,36 @@ class AnalyticsService:
         period: TimePeriod | str,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
+        tz_name: str = "Africa/Cairo",
     ) -> tuple[datetime, datetime]:
         """Convert a period token or custom date range into explicit UTC datetime bounds."""
-        now = datetime.now(timezone.utc)
+        try:
+            branch_tz = ZoneInfo(tz_name)
+        except Exception:
+            branch_tz = timezone.utc
+
+        local_now = datetime.now(branch_tz)
+        now_utc = local_now.astimezone(timezone.utc)
         p_str = str(period).lower()
 
         if p_str == TimePeriod.CUSTOM.value:
-            start = _ensure_aware(start_date) if start_date else (now - timedelta(days=30))
-            end = _ensure_aware(end_date) if end_date else now
+            start = _ensure_aware(start_date) if start_date else (now_utc - timedelta(days=30))
+            end = _ensure_aware(end_date) if end_date else now_utc
             return start, end
 
         if p_str == TimePeriod.YESTERDAY.value:
-            yest_date = now.date() - timedelta(days=1)
-            y_start = datetime.combine(yest_date, time.min, tzinfo=timezone.utc)
-            y_end = datetime.combine(yest_date, time.max, tzinfo=timezone.utc)
+            yest_date = local_now.date() - timedelta(days=1)
+            y_start = datetime.combine(yest_date, time.min, tzinfo=branch_tz).astimezone(timezone.utc)
+            y_end = datetime.combine(yest_date, time.max, tzinfo=branch_tz).astimezone(timezone.utc)
             return y_start, y_end
 
         # Quantize sliding now window ceiling to 300-second boundary for deterministic caching
-        now_ts = int(now.timestamp())
+        now_ts = int(now_utc.timestamp())
         next_boundary = ((now_ts // CACHE_TTL_SECONDS) + 1) * CACHE_TTL_SECONDS
         ceil_now = datetime.fromtimestamp(next_boundary, tz=timezone.utc)
 
         if p_str == TimePeriod.TODAY.value:
-            today_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+            today_start = datetime.combine(local_now.date(), time.min, tzinfo=branch_tz).astimezone(timezone.utc)
             return today_start, ceil_now
         elif p_str == TimePeriod.LAST_7_DAYS.value:
             return ceil_now - timedelta(days=7), ceil_now
@@ -98,16 +106,19 @@ class AnalyticsService:
         cls,
         db: AsyncSession,
         branch_id: uuid.UUID | None = None,
+        tenant_id: uuid.UUID | None = None,
+        brand_id: uuid.UUID | None = None,
         period: TimePeriod | str = TimePeriod.LAST_30_DAYS,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
         limit: int = 10,
         force_refresh: bool = False,
+        tz_name: str = "Africa/Cairo",
     ) -> DashboardConsolidatedResponse:
         """Fetch unified executive dashboard with Redis caching."""
-        p_start, p_end = cls.resolve_time_bounds(period, start_date, end_date)
+        p_start, p_end = cls.resolve_time_bounds(period, start_date, end_date, tz_name=tz_name)
         period_key = str(period).lower()
-        cache_key = f"analytics:{branch_id or 'global'}:{period_key}:{int(p_start.timestamp())}:{int(p_end.timestamp())}"
+        cache_key = f"analytics:{tenant_id or 'all'}:{brand_id or 'all'}:{branch_id or 'global'}:{period_key}:{int(p_start.timestamp())}:{int(p_end.timestamp())}"
         if limit != 10:
             cache_key += f":lim{limit}"
 
@@ -127,6 +138,8 @@ class AnalyticsService:
         kpis, top_items, bottom_items, categories, rankings = await cls._aggregate_dashboard_metrics(
             db=db,
             branch_id=branch_id,
+            tenant_id=tenant_id,
+            brand_id=brand_id,
             period_start=p_start,
             period_end=p_end,
             limit=limit,
@@ -161,16 +174,21 @@ class AnalyticsService:
         cls,
         db: AsyncSession,
         branch_id: uuid.UUID | None = None,
+        tenant_id: uuid.UUID | None = None,
+        brand_id: uuid.UUID | None = None,
         period: TimePeriod | str = TimePeriod.LAST_30_DAYS,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
         limit: int = 10,
+        tz_name: str = "Africa/Cairo",
     ) -> MenuPerformanceResponse:
         """Fetch dedicated menu engineering metrics (top items, dead-stock, and categories)."""
-        p_start, p_end = cls.resolve_time_bounds(period, start_date, end_date)
+        p_start, p_end = cls.resolve_time_bounds(period, start_date, end_date, tz_name=tz_name)
         _, top_items, bottom_items, categories, _ = await cls._aggregate_dashboard_metrics(
             db=db,
             branch_id=branch_id,
+            tenant_id=tenant_id,
+            brand_id=brand_id,
             period_start=p_start,
             period_end=p_end,
             limit=limit,
@@ -187,15 +205,20 @@ class AnalyticsService:
     async def get_branches_matrix(
         cls,
         db: AsyncSession,
+        tenant_id: uuid.UUID | None = None,
+        brand_id: uuid.UUID | None = None,
         period: TimePeriod | str = TimePeriod.LAST_30_DAYS,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
+        tz_name: str = "Africa/Cairo",
     ) -> BranchesMatrixResponse:
         """Fetch comparative matrix of all branches ranked by gross merchandise value."""
-        p_start, p_end = cls.resolve_time_bounds(period, start_date, end_date)
+        p_start, p_end = cls.resolve_time_bounds(period, start_date, end_date, tz_name=tz_name)
         _, _, _, _, rankings = await cls._aggregate_dashboard_metrics(
             db=db,
             branch_id=None,
+            tenant_id=tenant_id,
+            brand_id=brand_id,
             period_start=p_start,
             period_end=p_end,
             limit=10,
@@ -218,6 +241,8 @@ class AnalyticsService:
         period_start: datetime,
         period_end: datetime,
         limit: int,
+        tenant_id: uuid.UUID | None = None,
+        brand_id: uuid.UUID | None = None,
     ) -> tuple[
         ExecutiveKPISummary,
         list[ItemPerformanceItem],
@@ -236,6 +261,10 @@ class AnalyticsService:
         )
         if branch_id:
             orders_stmt = orders_stmt.where(Order.branch_id == branch_id)
+        elif brand_id:
+            orders_stmt = orders_stmt.join(Branch, Order.branch_id == Branch.id).where(Branch.brand_id == brand_id)
+        elif tenant_id:
+            orders_stmt = orders_stmt.join(Branch, Order.branch_id == Branch.id).where(Branch.tenant_id == tenant_id)
 
         orders_res = await db.execute(orders_stmt)
         orders = list(orders_res.scalars().all())
@@ -254,6 +283,10 @@ class AnalyticsService:
             payments_stmt = payments_stmt.where(
                 (Payment.branch_id == branch_id) | (Order.branch_id == branch_id)
             )
+        elif brand_id:
+            payments_stmt = payments_stmt.join(Branch, Payment.branch_id == Branch.id).where(Branch.brand_id == brand_id)
+        elif tenant_id:
+            payments_stmt = payments_stmt.join(Branch, Payment.branch_id == Branch.id).where(Branch.tenant_id == tenant_id)
 
         payments_res = await db.execute(payments_stmt)
         payments = list(payments_res.scalars().all())
@@ -326,6 +359,10 @@ class AnalyticsService:
         )
         if branch_id:
             items_stmt = items_stmt.where(Category.branch_id == branch_id)
+        elif brand_id:
+            items_stmt = items_stmt.join(Branch, Category.branch_id == Branch.id).where(Branch.brand_id == brand_id)
+        elif tenant_id:
+            items_stmt = items_stmt.join(Branch, Category.branch_id == Branch.id).where(Branch.tenant_id == tenant_id)
 
         items_res = await db.execute(items_stmt)
         all_catalog_items = list(items_res.scalars().all())
@@ -434,6 +471,10 @@ class AnalyticsService:
         rankings: list[BranchPerformanceRow] = []
         if branch_id is None:
             branches_stmt = select(Branch).where(Branch.is_active.is_(True))
+            if brand_id:
+                branches_stmt = branches_stmt.where(Branch.brand_id == brand_id)
+            elif tenant_id:
+                branches_stmt = branches_stmt.where(Branch.tenant_id == tenant_id)
             branches_res = await db.execute(branches_stmt)
             branches = list(branches_res.scalars().all())
 

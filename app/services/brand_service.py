@@ -7,11 +7,12 @@ import uuid
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.auth import Branch
+from app.models.auth import Branch, Table
 from app.models.brand import Brand
 from app.schemas.branch import (
     BranchCreateRequest,
@@ -42,69 +43,79 @@ class BrandService:
         actor_role: str | None = None,
     ) -> BrandResponse:
         """Create a new Brand with optional atomic single-location or multi-branch setup."""
-        # 1. Check Brand slug uniqueness
-        existing_brand = (
-            await db.execute(select(Brand).where(Brand.slug == payload.slug).limit(1))
-        ).scalar_one_or_none()
-        if existing_brand:
+        try:
+            # 1. Check Brand slug uniqueness
+            existing_brand = (
+                await db.execute(select(Brand).where(Brand.slug == payload.slug).limit(1))
+            ).scalar_one_or_none()
+            if existing_brand:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="BRAND_SLUG_ALREADY_EXISTS",
+                )
+
+            brand = Brand(
+                name=payload.name,
+                slug=payload.slug,
+                is_active=payload.is_active,
+            )
+            db.add(brand)
+            await db.flush()
+
+            branches_to_create = []
+            if payload.default_branch:
+                branches_to_create.append(payload.default_branch)
+            if payload.branches:
+                branches_to_create.extend(payload.branches)
+
+            created_branches = []
+            for b_data in branches_to_create:
+                # Check branch slug uniqueness within tenant
+                slug_exists = (
+                    await db.execute(
+                        select(Branch.id).where(
+                            Branch.tenant_id == tenant_id,
+                            Branch.slug == b_data.slug,
+                        ).limit(1)
+                    )
+                ).scalar_one_or_none()
+                if slug_exists:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"BRANCH_SLUG_ALREADY_EXISTS: {b_data.slug}",
+                    )
+
+                branch = Branch(
+                    tenant_id=tenant_id,
+                    brand_id=brand.id,
+                    name=b_data.name,
+                    slug=b_data.slug,
+                    currency=b_data.currency,
+                    timezone=b_data.timezone,
+                    latitude=b_data.latitude,
+                    longitude=b_data.longitude,
+                    geofence_radius_meters=b_data.geofence_radius_meters,
+                    tax_rate=b_data.tax_rate,
+                    service_fee_rate=b_data.service_fee_rate,
+                    is_service_taxable=b_data.is_service_taxable,
+                    is_tax_inclusive=b_data.is_tax_inclusive,
+                    service_fee_dine_in_only=b_data.service_fee_dine_in_only,
+                    is_active=b_data.is_active,
+                )
+                db.add(branch)
+                created_branches.append(branch)
+
+            await db.commit()
+            await db.refresh(brand)
+        except IntegrityError:
+            await db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="BRAND_SLUG_ALREADY_EXISTS",
             )
-
-        brand = Brand(
-            name=payload.name,
-            slug=payload.slug,
-            is_active=payload.is_active,
-        )
-        db.add(brand)
-        await db.flush()
-
-        branches_to_create = []
-        if payload.default_branch:
-            branches_to_create.append(payload.default_branch)
-        if payload.branches:
-            branches_to_create.extend(payload.branches)
-
-        created_branches = []
-        for b_data in branches_to_create:
-            # Check branch slug uniqueness within tenant
-            slug_exists = (
-                await db.execute(
-                    select(Branch.id).where(
-                        Branch.tenant_id == tenant_id,
-                        Branch.slug == b_data.slug,
-                    ).limit(1)
-                )
-            ).scalar_one_or_none()
-            if slug_exists:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"BRANCH_SLUG_ALREADY_EXISTS: {b_data.slug}",
-                )
-
-            branch = Branch(
-                tenant_id=tenant_id,
-                brand_id=brand.id,
-                name=b_data.name,
-                slug=b_data.slug,
-                currency=b_data.currency,
-                timezone=b_data.timezone,
-                latitude=b_data.latitude,
-                longitude=b_data.longitude,
-                geofence_radius_meters=b_data.geofence_radius_meters,
-                tax_rate=b_data.tax_rate,
-                service_fee_rate=b_data.service_fee_rate,
-                is_service_taxable=b_data.is_service_taxable,
-                is_tax_inclusive=b_data.is_tax_inclusive,
-                service_fee_dine_in_only=b_data.service_fee_dine_in_only,
-                is_active=b_data.is_active,
-            )
-            db.add(branch)
-            created_branches.append(branch)
-
-        await db.commit()
-        await db.refresh(brand)
+        except Exception:
+            await db.rollback()
+            raise
 
         # Audit Logging
         await AuditLogger.log(
@@ -236,8 +247,18 @@ class BrandService:
         if payload.is_active is not None:
             brand.is_active = payload.is_active
 
-        await db.commit()
-        await db.refresh(brand)
+        try:
+            await db.commit()
+            await db.refresh(brand)
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="BRAND_SLUG_ALREADY_EXISTS",
+            )
+        except Exception:
+            await db.rollback()
+            raise
 
         # Audit Logging
         await AuditLogger.log(
@@ -274,6 +295,11 @@ class BrandService:
         for b in brand.branches:
             if b.tenant_id == tenant_id:
                 b.is_active = False
+                await db.execute(
+                    update(Table)
+                    .where(Table.branch_id == b.id)
+                    .values(is_active=False)
+                )
 
         await db.commit()
 
@@ -342,8 +368,18 @@ class BrandService:
             is_active=payload.is_active,
         )
         db.add(branch)
-        await db.commit()
-        await db.refresh(branch)
+        try:
+            await db.commit()
+            await db.refresh(branch)
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="BRANCH_SLUG_ALREADY_EXISTS",
+            )
+        except Exception:
+            await db.rollback()
+            raise
 
         await AuditLogger.log(
             tenant_id=tenant_id,

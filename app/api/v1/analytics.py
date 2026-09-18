@@ -74,6 +74,8 @@ async def get_analytics_dashboard(
     return await AnalyticsService.get_dashboard(
         db=db,
         branch_id=branch_id,
+        tenant_id=current_user.tenant_id,
+        brand_id=getattr(current_user, "brand_id", None),
         period=period,
         start_date=start_date,
         end_date=end_date,
@@ -102,6 +104,8 @@ async def get_menu_performance(
     return await AnalyticsService.get_menu_performance(
         db=db,
         branch_id=branch_id,
+        tenant_id=current_user.tenant_id,
+        brand_id=getattr(current_user, "brand_id", None),
         period=period,
         start_date=start_date,
         end_date=end_date,
@@ -125,6 +129,8 @@ async def get_branches_matrix(
     """Retrieve ranked comparative performance across all active branches by GMV."""
     return await AnalyticsService.get_branches_matrix(
         db=db,
+        tenant_id=current_user.tenant_id,
+        brand_id=getattr(current_user, "brand_id", None),
         period=period,
         start_date=start_date,
         end_date=end_date,

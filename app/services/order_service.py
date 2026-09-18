@@ -8,14 +8,15 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.state_machine import OrderStateMachine
 from app.models.auth import Branch, Table
 from app.models.catalog import Category, Item, ModifierGroup, ModifierOption
-from app.models.enums import KitchenStation, OrderSource, OrderStatus, OrderType, TableStatus, UserRole
+from app.models.enums import KitchenStation, MenuItemScope, OrderSource, OrderStatus, OrderType, TableStatus, UserRole
+from app.models.menu import BranchMenuOverride
 from app.models.order import Order, OrderItem
 from app.schemas.i18n import resolve_localized_string
 from app.schemas.order import (
@@ -119,7 +120,7 @@ class OrderService:
         table_res = await db.execute(table_stmt)
         table = table_res.scalar_one_or_none()
 
-        if table is None or table.branch_id != session.branch_id or not table.is_active:
+        if table is None or table.branch_id != session.branch_id or not table.is_active or not table.branch or not table.branch.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="TABLE_INACTIVE",
@@ -195,12 +196,20 @@ class OrderService:
         new_items: list[OrderItem] = []
         for item_input in payload.items:
             # Query item with active category and full modifier tree
+            if table.branch and table.branch.brand_id:
+                branch_clause = or_(
+                    Category.branch_id == session.branch_id,
+                    Item.brand_id == table.branch.brand_id,
+                )
+            else:
+                branch_clause = (Category.branch_id == session.branch_id)
+
             item_stmt = (
                 select(Item)
                 .join(Category, Item.category_id == Category.id)
                 .where(
                     Item.id == item_input.item_id,
-                    Category.branch_id == session.branch_id,
+                    branch_clause,
                     Category.is_active.is_(True),
                 )
                 .options(
@@ -218,7 +227,22 @@ class OrderService:
                     detail="ITEM_NOT_FOUND",
                 )
 
-            if not catalog_item.is_available:
+            # Query branch-level override for 86 out-of-stock and price overrides
+            override_stmt = select(BranchMenuOverride).where(
+                BranchMenuOverride.branch_id == session.branch_id,
+                BranchMenuOverride.menu_item_id == catalog_item.id,
+            )
+            override = (await db.execute(override_stmt)).scalar_one_or_none()
+
+            # Scope enforcement: SPECIFIC_BRANCHES requires an active branch override
+            if catalog_item.scope == MenuItemScope.SPECIFIC_BRANCHES and override is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="ITEM_NOT_PERMITTED_FOR_BRANCH",
+                )
+
+            effective_available = override.is_available if override is not None else catalog_item.is_available
+            if not effective_available:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="ITEM_UNAVAILABLE",
@@ -292,7 +316,10 @@ class OrderService:
                     })
 
             # Calculate line pricing
-            base_price = Decimal(str(catalog_item.base_price))
+            if override is not None and override.price_override is not None:
+                base_price = Decimal(str(override.price_override))
+            else:
+                base_price = Decimal(str(catalog_item.base_price))
             unit_price = base_price + total_modifier_delta
             line_subtotal = unit_price * Decimal(item_input.quantity)
 

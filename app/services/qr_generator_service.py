@@ -43,9 +43,12 @@ class QRGeneratorService:
         return getattr(settings, "CLIENT_DOMAIN", "app.restaurant.com")
 
     @classmethod
-    def compute_signature(cls, table_id: uuid.UUID, branch_id: uuid.UUID, timestamp: int) -> str:
-        """Compute HMAC-SHA256 signature for table and branch at given timestamp."""
-        payload = f"{table_id}:{branch_id}:{timestamp}"
+    def compute_signature(cls, table_id: uuid.UUID | str, branch_id: uuid.UUID | str, timestamp: int | str) -> str:
+        """Compute HMAC-SHA256 signature for table and branch at given timestamp with normalized payload."""
+        canonical_table = str(uuid.UUID(str(table_id)))
+        canonical_branch = str(uuid.UUID(str(branch_id)))
+        canonical_ts = int(timestamp)
+        payload = f"{canonical_table}:{canonical_branch}:{canonical_ts}"
         secret = settings.SECRET_KEY.encode("utf-8")
         return hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
