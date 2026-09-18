@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from app.api.v1.analytics import router as analytics_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.branches import router as branches_router
@@ -32,6 +33,7 @@ api_v1_router.include_router(orders_router)
 api_v1_router.include_router(pos_router)
 api_v1_router.include_router(floor_router, prefix="/floor")
 api_v1_router.include_router(financials_router, prefix="/financials")
+api_v1_router.include_router(analytics_router, prefix="/analytics")
 api_v1_router.include_router(service_requests_router)
 api_v1_router.include_router(payments_router)
 api_v1_router.include_router(websocket_router)
