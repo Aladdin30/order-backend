@@ -7,19 +7,28 @@ import uuid
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.auth import Branch
 from app.models.catalog import Category, Item, ModifierGroup, ModifierOption
+from app.models.enums import KitchenStation, MenuItemScope
+from app.models.menu import BranchMenuOverride
 from app.schemas.i18n import resolve_localized_string
 from app.schemas.menu import (
+    BranchMenuCategoryGroup,
+    BranchMenuItemResponse,
+    BranchMenuOverrideUpdate,
+    BranchMenuResponse,
     MenuCategoryResponse,
     MenuTreeResponse,
+    ScopedItemCreateRequest,
     SelectedModifierOptionSnapshot,
     ValidateItemSelectionRequest,
     ValidatedItemSelectionResponse,
 )
+
 
 
 class MenuService:
@@ -239,3 +248,227 @@ class MenuService:
             guest_label=payload.guest_label,
             special_instructions=payload.special_instructions,
         )
+
+    @classmethod
+    async def get_branch_menu(
+        cls,
+        db: AsyncSession,
+        branch_id: uuid.UUID,
+    ) -> BranchMenuResponse:
+        """Fetch the effective scoped catalog menu for a branch in a single pass (Zero N+1).
+
+        Resolves catalog items scoped to the brand and branch, applying BranchMenuOverride
+        for dynamic price_override and is_available switches.
+        """
+        # 1. Fetch branch to retrieve brand_id and currency
+        branch_stmt = select(Branch).where(Branch.id == branch_id)
+        branch_res = await db.execute(branch_stmt)
+        branch = branch_res.scalar_one_or_none()
+        if not branch:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="BRANCH_NOT_FOUND",
+            )
+
+        # 2. Single-pass query: Item joined with Category and BranchMenuOverride
+        # LEFT OUTER JOIN on BranchMenuOverride.menu_item_id == Item.id AND BranchMenuOverride.branch_id == branch_id
+        final_price_col = func.coalesce(BranchMenuOverride.price_override, Item.base_price).label("final_price")
+        is_avail_col = func.coalesce(BranchMenuOverride.is_available, Item.is_available).label("effective_is_available")
+        is_vis_col = func.coalesce(BranchMenuOverride.is_visible, True).label("effective_is_visible")
+
+        stmt = (
+            select(
+                Item,
+                Category,
+                BranchMenuOverride,
+                final_price_col,
+                is_avail_col,
+                is_vis_col,
+            )
+            .join(Category, Item.category_id == Category.id)
+            .outerjoin(
+                BranchMenuOverride,
+                and_(
+                    BranchMenuOverride.menu_item_id == Item.id,
+                    BranchMenuOverride.branch_id == branch_id,
+                ),
+            )
+            .where(
+                Item.is_active.is_(True),
+                Category.is_active.is_(True),
+                or_(
+                    Item.scope == MenuItemScope.ALL_BRANCHES,
+                    BranchMenuOverride.branch_id.is_not(None),
+                ),
+                func.coalesce(BranchMenuOverride.is_visible, True).is_(True),
+            )
+        )
+
+        if branch.brand_id is not None:
+            stmt = stmt.where(
+                or_(
+                    Item.brand_id == branch.brand_id,
+                    Category.branch_id == branch_id,
+                )
+            )
+        else:
+            stmt = stmt.where(Category.branch_id == branch_id)
+
+        stmt = stmt.order_by(
+            Category.display_order.asc(),
+            Category.created_at.asc(),
+            Item.created_at.asc(),
+        )
+
+        rows = (await db.execute(stmt)).all()
+
+        # 3. Group items by Category in memory
+        categories_map: dict[uuid.UUID, BranchMenuCategoryGroup] = {}
+        for item, cat, override, final_price, effective_available, effective_visible in rows:
+            if cat.id not in categories_map:
+                categories_map[cat.id] = BranchMenuCategoryGroup(
+                    category_id=cat.id,
+                    category_name=cat.name,
+                    display_order=cat.display_order,
+                    items=[],
+                )
+
+            categories_map[cat.id].items.append(
+                BranchMenuItemResponse(
+                    id=item.id,
+                    category_id=cat.id,
+                    category_name=cat.name,
+                    name=item.name,
+                    description=item.description,
+                    base_price=item.base_price,
+                    final_price=final_price,
+                    scope=item.scope,
+                    is_available=bool(effective_available),
+                    is_visible=bool(effective_visible),
+                    has_override=override is not None,
+                    price_override=override.price_override if override else None,
+                    image_url=item.image_url,
+                    allergens=item.allergens or [],
+                    dietary_badges=item.dietary_badges or [],
+                )
+            )
+
+        category_list = list(categories_map.values())
+
+        return BranchMenuResponse(
+            branch_id=branch_id,
+            brand_id=branch.brand_id,
+            currency=getattr(branch, "currency", "EGP") or "EGP",
+            categories=category_list,
+        )
+
+    @classmethod
+    async def create_catalog_item(
+        cls,
+        db: AsyncSession,
+        payload: ScopedItemCreateRequest,
+    ) -> Item:
+        """Create a new catalog item with ALL_BRANCHES or SPECIFIC_BRANCHES scope.
+
+        If SPECIFIC_BRANCHES is chosen, bulk creates BranchMenuOverride entries for each target branch.
+        """
+        item = Item(
+            name=payload.name,
+            description=payload.description,
+            base_price=payload.base_price,
+            category_id=payload.category_id,
+            brand_id=payload.brand_id,
+            scope=payload.scope,
+            station_id=payload.station_id,
+            image_url=payload.image_url,
+            is_active=True,
+            is_available=True,
+        )
+        db.add(item)
+        await db.flush()
+
+        if payload.scope == MenuItemScope.SPECIFIC_BRANCHES and payload.target_branch_ids:
+            for b_id in payload.target_branch_ids:
+                override = BranchMenuOverride(
+                    branch_id=b_id,
+                    menu_item_id=item.id,
+                    price_override=None,
+                    is_available=True,
+                    is_visible=True,
+                )
+                db.add(override)
+            await db.flush()
+
+        await db.commit()
+        await db.refresh(item)
+        return item
+
+    @classmethod
+    async def set_branch_override(
+        cls,
+        db: AsyncSession,
+        branch_id: uuid.UUID,
+        menu_item_id: uuid.UUID,
+        price_override: Decimal | None = None,
+        is_available: bool | None = None,
+        is_visible: bool | None = None,
+    ) -> BranchMenuOverride:
+        """Modify branch-specific availability (86), price override, or visibility."""
+        stmt = select(BranchMenuOverride).where(
+            BranchMenuOverride.branch_id == branch_id,
+            BranchMenuOverride.menu_item_id == menu_item_id,
+        )
+        result = await db.execute(stmt)
+        override = result.scalar_one_or_none()
+
+        if override is None:
+            override = BranchMenuOverride(
+                branch_id=branch_id,
+                menu_item_id=menu_item_id,
+                price_override=price_override,
+                is_available=is_available if is_available is not None else True,
+                is_visible=is_visible if is_visible is not None else True,
+            )
+            db.add(override)
+        else:
+            if price_override is not None:
+                override.price_override = price_override
+            if is_available is not None:
+                override.is_available = is_available
+            if is_visible is not None:
+                override.is_visible = is_visible
+
+        await db.commit()
+        await db.refresh(override)
+        return override
+
+    @classmethod
+    async def bulk_assign_item_branches(
+        cls,
+        db: AsyncSession,
+        menu_item_id: uuid.UUID,
+        branch_ids: list[uuid.UUID],
+    ) -> list[BranchMenuOverride]:
+        """Bulk assign an item to specific branches via BranchMenuOverride."""
+        overrides = []
+        for b_id in branch_ids:
+            stmt = select(BranchMenuOverride).where(
+                BranchMenuOverride.branch_id == b_id,
+                BranchMenuOverride.menu_item_id == menu_item_id,
+            )
+            existing = (await db.execute(stmt)).scalar_one_or_none()
+            if not existing:
+                override = BranchMenuOverride(
+                    branch_id=b_id,
+                    menu_item_id=menu_item_id,
+                    is_visible=True,
+                    is_available=True,
+                )
+                db.add(override)
+                overrides.append(override)
+            else:
+                existing.is_visible = True
+                overrides.append(existing)
+        await db.commit()
+        return overrides
+

@@ -18,11 +18,12 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, LocalizedText, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import KitchenStation
+from app.models.enums import KitchenStation, MenuItemScope
 
 if TYPE_CHECKING:
     from app.models.auth import Branch
     from app.models.kitchen_station import KitchenStation as KitchenStationRecord
+    from app.models.menu import BranchMenuOverride
     from app.models.order import OrderItem
 
 
@@ -79,9 +80,23 @@ class Item(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         index=True,
     )
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brands.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        default=None,
+    )
     name: Mapped[LocalizedText] = mapped_column(JSONB, nullable=False)
     description: Mapped[LocalizedText | None] = mapped_column(JSONB, nullable=True)
     base_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    scope: Mapped[MenuItemScope] = mapped_column(
+        SAEnum(MenuItemScope, name="menu_item_scope", native_enum=False),
+        default=MenuItemScope.ALL_BRANCHES,
+        server_default=MenuItemScope.ALL_BRANCHES.value,
+        nullable=False,
+        index=True,
+    )
     station_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("kitchen_stations.id", ondelete="SET NULL"),
@@ -99,6 +114,12 @@ class Item(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=True,
         nullable=False,
         doc="Item 86 switch to instantly 86 an item when stock runs out.",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
     )
     allergens: Mapped[list[str]] = mapped_column(
         JSONB,
@@ -128,6 +149,17 @@ class Item(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "OrderItem",
         back_populates="item",
     )
+    branch_overrides: Mapped[list[BranchMenuOverride]] = relationship(
+        "BranchMenuOverride",
+        back_populates="menu_item",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+# Alias
+MenuItem = Item
+
 
 
 class ModifierGroup(Base, UUIDPrimaryKeyMixin, TimestampMixin):

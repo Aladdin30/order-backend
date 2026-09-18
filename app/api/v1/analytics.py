@@ -25,14 +25,16 @@ analytics_router = router
 
 ANALYTICS_ROLES = [
     UserRole.SUPER_ADMIN,
+    UserRole.BRAND_ADMIN,
     UserRole.REGIONAL_MANAGER,
 ]
 
 
 def _verify_regional_manager_branch_scope(user: User, branch_id: uuid.UUID | None) -> None:
-    """Verify that a regional manager has explicit access to the queried branch."""
-    if branch_id is None or user.role == UserRole.SUPER_ADMIN:
+    """Verify that a regional manager or brand admin has explicit access to the queried branch."""
+    if branch_id is None or user.role in (UserRole.SUPER_ADMIN, UserRole.BRAND_ADMIN):
         return
+
 
     user_branch_id = getattr(user, "branch_id", None)
     if user_branch_id == branch_id:

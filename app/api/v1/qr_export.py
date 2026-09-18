@@ -24,8 +24,10 @@ router = APIRouter(tags=["qr-export"])
 
 QR_EXPORT_ROLES = [
     UserRole.BRANCH_ADMIN,
+    UserRole.BRAND_ADMIN,
     UserRole.SUPER_ADMIN,
 ]
+
 
 
 @router.get(

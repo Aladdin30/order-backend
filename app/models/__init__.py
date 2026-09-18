@@ -3,9 +3,11 @@
 from app.models.audit import AuditLog
 from app.models.auth import Branch, Table, Tenant, User, UserBranchAccess
 from app.models.base import Base, LocalizedText, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.brand import Brand
 from app.models.catalog import Category, Item, ModifierGroup, ModifierOption
 from app.models.enums import (
     KitchenStation,
+    MenuItemScope,
     OrderStatus,
     OrderType,
     PaymentMethod,
@@ -16,6 +18,7 @@ from app.models.enums import (
     UserRole,
 )
 from app.models.kitchen_station import KitchenStation as KitchenStationModel
+from app.models.menu import BranchMenuOverride, MenuItem
 from app.models.order import Order, OrderItem, Payment
 from app.models.service import Review, ServiceRequest
 
@@ -36,7 +39,9 @@ __all__ = [
     "ServiceRequestStatus",
     "PaymentMethod",
     "PaymentStatus",
+    "MenuItemScope",
     # Auth & Tenancy
+    "Brand",
     "Tenant",
     "Branch",
     "User",
@@ -45,6 +50,8 @@ __all__ = [
     # Catalog & Menu
     "Category",
     "Item",
+    "MenuItem",
+    "BranchMenuOverride",
     "ModifierGroup",
     "ModifierOption",
     # Orders & Financial Ledgers

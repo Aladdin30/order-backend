@@ -23,8 +23,10 @@ from app.models.base import Base, LocalizedText, TimestampMixin, UUIDPrimaryKeyM
 from app.models.enums import TableStatus, UserRole
 
 if TYPE_CHECKING:
+    from app.models.brand import Brand
     from app.models.catalog import Category
     from app.models.kitchen_station import KitchenStation
+    from app.models.menu import BranchMenuOverride
     from app.models.order import Order, Payment
     from app.models.service import Review, ServiceRequest
 
@@ -68,8 +70,27 @@ class Branch(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         index=True,
     )
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brands.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        default=None,
+    )
     name: Mapped[LocalizedText] = mapped_column(JSONB, nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        default="EGP",
+        server_default="EGP",
+        nullable=False,
+    )
+    timezone: Mapped[str] = mapped_column(
+        String(50),
+        default="Africa/Cairo",
+        server_default="Africa/Cairo",
+        nullable=False,
+    )
     latitude: Mapped[Decimal] = mapped_column(Numeric(10, 7), nullable=False)
     longitude: Mapped[Decimal] = mapped_column(Numeric(10, 7), nullable=False)
     geofence_radius_meters: Mapped[int] = mapped_column(
@@ -115,6 +136,13 @@ class Branch(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Relationships
     tenant: Mapped[Tenant] = relationship("Tenant", back_populates="branches")
+    brand: Mapped[Brand | None] = relationship("Brand", back_populates="branches")
+    menu_overrides: Mapped[list[BranchMenuOverride]] = relationship(
+        "BranchMenuOverride",
+        back_populates="branch",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     user_access: Mapped[list[UserBranchAccess]] = relationship(
         "UserBranchAccess",
         back_populates="branch",
@@ -162,6 +190,7 @@ class Branch(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
 
+
 class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Staff and administrative users scoped to a tenant."""
 
@@ -172,6 +201,13 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brands.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        default=None,
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -184,6 +220,7 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Relationships
     tenant: Mapped[Tenant] = relationship("Tenant", back_populates="users")
+    brand: Mapped[Brand | None] = relationship("Brand", back_populates="users")
     branch_access: Mapped[list[UserBranchAccess]] = relationship(
         "UserBranchAccess",
         back_populates="user",
@@ -205,13 +242,16 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         """Convenience property for primary assigned branch."""
         if hasattr(self, "_branch_id") and self._branch_id is not None:
             return self._branch_id
-        if self.branch_access:
+        if getattr(self, "role", None) in (UserRole.SUPER_ADMIN, UserRole.BRAND_ADMIN):
+            return None
+        if "branch_access" in self.__dict__ and self.branch_access:
             return self.branch_access[0].branch_id
         return None
 
     @branch_id.setter
     def branch_id(self, value: uuid.UUID | None) -> None:
         self._branch_id = value
+
 
 
 class UserBranchAccess(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -252,7 +292,15 @@ class Table(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         index=True,
     )
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brands.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        default=None,
+    )
     table_number: Mapped[str] = mapped_column(String(50), nullable=False)
+
     capacity: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     status: Mapped[TableStatus] = mapped_column(
         SAEnum(TableStatus, name="table_status", native_enum=True),

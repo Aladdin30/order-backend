@@ -50,12 +50,13 @@ from app.models import (
 def test_mapper_compilation():
     """Verify that all SQLAlchemy 2.0 mappers configure without circular import or typing errors."""
     configure_mappers()
-    assert len(Base.metadata.tables) == 16
+    assert len(Base.metadata.tables) == 18
 
 
 def test_table_registration():
-    """Verify all 16 domain and audit tables are properly registered in Base.metadata."""
+    """Verify all 18 domain and audit tables are properly registered in Base.metadata."""
     expected_tables = {
+        "brands",
         "tenants",
         "branches",
         "users",
@@ -64,6 +65,7 @@ def test_table_registration():
         "kitchen_stations",
         "categories",
         "items",
+        "branch_menu_overrides",
         "modifier_groups",
         "modifier_options",
         "orders",
@@ -261,6 +263,7 @@ def test_check_constraints():
 def test_domain_enums():
     """Verify all required enum types and values."""
     assert UserRole.SUPER_ADMIN == "SUPER_ADMIN"
+    assert UserRole.BRAND_ADMIN == "BRAND_ADMIN"
     assert UserRole.REGIONAL_MANAGER == "REGIONAL_MANAGER"
     assert UserRole.BRANCH_ADMIN == "BRANCH_ADMIN"
     assert UserRole.CASHIER == "CASHIER"
@@ -495,11 +498,13 @@ def test_alembic_metadata_auto_detection():
     # Import target_metadata directly as done in env.py
     from app.models import Base as AppBase
 
-    assert len(AppBase.metadata.tables) == 16
+    assert len(AppBase.metadata.tables) == 18
     assert "orders" in AppBase.metadata.tables
     assert "branches" in AppBase.metadata.tables
     assert "audit_logs" in AppBase.metadata.tables
     assert "kitchen_stations" in AppBase.metadata.tables
+    assert "brands" in AppBase.metadata.tables
+    assert "branch_menu_overrides" in AppBase.metadata.tables
 
 
 def test_postgresql_ddl_generation():

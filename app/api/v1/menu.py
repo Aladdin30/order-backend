@@ -17,13 +17,20 @@ from app.api.deps_session import get_current_guest_session
 from app.core.security import decode_access_token
 from app.core.session_security import GuestSessionJWTError, decode_guest_session_jwt
 from app.models.auth import Branch, Table, User
+
+from app.models.enums import UserRole
 from app.schemas.menu import (
+    BranchMenuOverrideUpdate,
+    BranchMenuResponse,
     MenuTreeResponse,
+    ScopedItemCreateRequest,
     ValidateItemSelectionRequest,
     ValidatedItemSelectionResponse,
 )
+
 from app.schemas.session import GuestSessionContext
 from app.services.menu_service import MenuService
+
 
 router = APIRouter(prefix="/menu", tags=["menu"])
 
@@ -231,3 +238,71 @@ async def validate_item_selection(
         table_id=table_id,
         payload=body,
     )
+
+
+@router.get(
+    "/branch/{branch_id}",
+    response_model=BranchMenuResponse,
+    summary="Get Scoped Branch Menu",
+    description="Fetch the effective catalog menu for a branch with brand inheritance, scope filtering, and branch overrides.",
+)
+async def get_branch_menu(
+    branch_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> BranchMenuResponse:
+    """Fetch effective scoped branch menu."""
+    return await MenuService.get_branch_menu(db=db, branch_id=branch_id)
+
+
+@router.post(
+    "/catalog-items",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Scoped Catalog Item",
+    description="Brand Admin creates a catalog item with ALL_BRANCHES or SPECIFIC_BRANCHES scope.",
+)
+async def create_catalog_item(
+    body: ScopedItemCreateRequest,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> dict:
+    """Create scoped catalog item."""
+    item = await MenuService.create_catalog_item(db=db, payload=body)
+    return {
+        "id": str(item.id),
+        "name": item.name,
+        "base_price": str(item.base_price),
+        "scope": item.scope.value,
+        "category_id": str(item.category_id),
+        "brand_id": str(item.brand_id) if item.brand_id else None,
+    }
+
+
+@router.patch(
+    "/branches/{branch_id}/items/{item_id}/override",
+    status_code=status.HTTP_200_OK,
+    summary="Set Branch Menu Override",
+    description="Branch Admin modifies price override or out-of-stock availability for an item in their branch.",
+)
+async def set_branch_override(
+    branch_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: BranchMenuOverrideUpdate,
+    db: Annotated[AsyncSession, Depends(get_async_db)],
+) -> dict:
+    """Set or update branch-specific override."""
+    override = await MenuService.set_branch_override(
+        db=db,
+        branch_id=branch_id,
+        menu_item_id=item_id,
+        price_override=body.price_override,
+        is_available=body.is_available,
+        is_visible=body.is_visible,
+    )
+    return {
+        "id": str(override.id),
+        "branch_id": str(override.branch_id),
+        "menu_item_id": str(override.menu_item_id),
+        "price_override": str(override.price_override) if override.price_override is not None else None,
+        "is_available": override.is_available,
+        "is_visible": override.is_visible,
+    }
+

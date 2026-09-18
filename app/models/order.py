@@ -48,12 +48,20 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         index=True,
     )
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brands.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        default=None,
+    )
     branch_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("branches.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
+
     table_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tables.id", ondelete="RESTRICT"),
@@ -213,12 +221,20 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
         index=True,
     )
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brands.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        default=None,
+    )
     branch_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("branches.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
+
     order_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="RESTRICT"),

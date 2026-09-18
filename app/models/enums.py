@@ -7,11 +7,20 @@ class UserRole(StrEnum):
     """User access hierarchy and role-based permissions."""
 
     SUPER_ADMIN = "SUPER_ADMIN"
+    BRAND_ADMIN = "BRAND_ADMIN"
     REGIONAL_MANAGER = "REGIONAL_MANAGER"
     BRANCH_ADMIN = "BRANCH_ADMIN"
     CASHIER = "CASHIER"
     WAITER = "WAITER"
     KITCHEN_STAFF = "KITCHEN_STAFF"
+
+
+class MenuItemScope(StrEnum):
+    """Catalog item availability scope across brand branches."""
+
+    ALL_BRANCHES = "ALL_BRANCHES"
+    SPECIFIC_BRANCHES = "SPECIFIC_BRANCHES"
+
 
 
 class TableStatus(StrEnum):

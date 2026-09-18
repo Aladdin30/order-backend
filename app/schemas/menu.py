@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from app.models.enums import KitchenStation
+from app.models.enums import KitchenStation, MenuItemScope
 from app.schemas.i18n import LocalizedStr, OptionalLocalizedStr
 
 
@@ -186,3 +186,75 @@ class ValidatedItemSelectionResponse(BaseModel):
     )
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Scoped Menu & Branch Override Schemas
+# ---------------------------------------------------------------------------
+
+
+class BranchMenuItemResponse(BaseModel):
+    """Catalog item resolved with branch-specific overrides."""
+
+    id: uuid.UUID
+    category_id: uuid.UUID
+    category_name: LocalizedStr | None = None
+    name: LocalizedStr
+    description: OptionalLocalizedStr = None
+    base_price: Decimal
+    final_price: Decimal
+    scope: MenuItemScope = MenuItemScope.ALL_BRANCHES
+    is_available: bool
+    is_visible: bool = True
+    has_override: bool = False
+    price_override: Decimal | None = None
+    image_url: str | None = None
+    allergens: list[str] = Field(default_factory=list)
+    dietary_badges: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BranchMenuCategoryGroup(BaseModel):
+    """Category grouping for branch menu display."""
+
+    category_id: uuid.UUID
+    category_name: LocalizedStr
+    display_order: int = 0
+    items: list[BranchMenuItemResponse] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BranchMenuResponse(BaseModel):
+    """Complete effective branch menu with categories and overridden items."""
+
+    branch_id: uuid.UUID
+    brand_id: uuid.UUID | None = None
+    currency: str = "EGP"
+    categories: list[BranchMenuCategoryGroup] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BranchMenuOverrideUpdate(BaseModel):
+    """Payload for branch admin to modify branch-specific price or availability."""
+
+    price_override: Decimal | None = None
+    is_available: bool | None = None
+    is_visible: bool | None = None
+
+
+class ScopedItemCreateRequest(BaseModel):
+    """Payload for creating a brand-level catalog item with scope."""
+
+    name: dict[str, str]
+    description: dict[str, str] | None = None
+    base_price: Decimal
+    category_id: uuid.UUID
+    brand_id: uuid.UUID | None = None
+    scope: MenuItemScope = MenuItemScope.ALL_BRANCHES
+    target_branch_ids: list[uuid.UUID] | None = None
+    station_id: uuid.UUID | None = None
+    image_url: str | None = None
+

@@ -116,7 +116,14 @@ class ZReport(FinancialBase):
         nullable=False,
         index=True,
     )
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+        default=None,
+    )
     generated_by_user_id: Mapped[uuid.UUID] = mapped_column(
+
         UUID(as_uuid=True),
         nullable=False,
         index=True,
