@@ -77,6 +77,36 @@ class Branch(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=150,
         nullable=False,
     )
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0.0000"),
+        server_default="0.0000",
+        nullable=False,
+    )
+    service_fee_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0.0000"),
+        server_default="0.0000",
+        nullable=False,
+    )
+    is_service_taxable: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+    is_tax_inclusive: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+    service_fee_dine_in_only: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     __table_args__ = (

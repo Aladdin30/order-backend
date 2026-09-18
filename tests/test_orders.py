@@ -85,6 +85,7 @@ async def seed_order_data(test_session: AsyncSession) -> dict:
         latitude=24.7136,
         longitude=46.6753,
         geofence_radius_meters=150,
+        tax_rate=Decimal("0.1500"),
         is_active=True,
     )
     test_session.add(branch)

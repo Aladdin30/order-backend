@@ -24,6 +24,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.enums import (
     KitchenStation,
+    OrderSource,
     OrderStatus,
     OrderType,
     PaymentMethod,
@@ -53,10 +54,10 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         index=True,
     )
-    table_id: Mapped[uuid.UUID] = mapped_column(
+    table_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tables.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     status: Mapped[OrderStatus] = mapped_column(
@@ -69,9 +70,44 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=OrderType.DINE_IN,
         nullable=False,
     )
+    order_source: Mapped[OrderSource] = mapped_column(
+        SAEnum(OrderSource, name="order_source", native_enum=True),
+        default=OrderSource.QR_CUSTOMER,
+        server_default="QR_CUSTOMER",
+        nullable=False,
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    pickup_number: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        nullable=True,
+        index=True,
+    )
     subtotal: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         default=Decimal("0.00"),
+        nullable=False,
+    )
+    service_fee_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0.0000"),
+        server_default="0.0000",
+        nullable=False,
+    )
+    service_fee_total: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        default=Decimal("0.00"),
+        server_default="0.00",
+        nullable=False,
+    )
+    applied_tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("0.0000"),
+        server_default="0.0000",
         nullable=False,
     )
     tax_total: Mapped[Decimal] = mapped_column(
@@ -86,6 +122,7 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     is_paid: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     customer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         Index("ix_orders_branch_status", "branch_id", "status"),
@@ -95,7 +132,8 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Relationships
     tenant: Mapped[Tenant] = relationship("Tenant", back_populates="orders")
     branch: Mapped[Branch] = relationship("Branch", back_populates="orders")
-    table: Mapped[Table] = relationship("Table", back_populates="orders")
+    table: Mapped[Table | None] = relationship("Table", back_populates="orders")
+    created_by_user: Mapped[User | None] = relationship("User", foreign_keys=[created_by_user_id])
     order_items: Mapped[list[OrderItem]] = relationship(
         "OrderItem",
         back_populates="order",

@@ -196,6 +196,7 @@ class StationRoutingService:
                 branch_id=order.branch_id,
                 table_id=order.table_id,
                 table_number=resolved_table_number,
+                pickup_number=getattr(order, "pickup_number", None),
                 station=stn,
                 order_status=order.status,
                 order_type=order.order_type,

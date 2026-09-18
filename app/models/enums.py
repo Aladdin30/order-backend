@@ -54,6 +54,14 @@ class OrderType(StrEnum):
     TAKEAWAY = "TAKEAWAY"
 
 
+class OrderSource(StrEnum):
+    """Channel/source origin of an order."""
+
+    QR_CUSTOMER = "QR_CUSTOMER"
+    CASHIER_POS = "CASHIER_POS"
+    TAKE_A_WAY_APP = "TAKE_A_WAY_APP"
+
+
 class ServiceRequestType(StrEnum):
     """Guest table-side assistance request categories."""
 

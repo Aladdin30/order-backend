@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.state_machine import OrderStateMachine
-from app.models.auth import Table
+from app.models.auth import Branch, Table
 from app.models.catalog import Category, Item, ModifierGroup, ModifierOption
-from app.models.enums import KitchenStation, OrderStatus, OrderType, TableStatus, UserRole
+from app.models.enums import KitchenStation, OrderSource, OrderStatus, OrderType, TableStatus, UserRole
 from app.models.order import Order, OrderItem
 from app.schemas.i18n import resolve_localized_string
 from app.schemas.order import (
@@ -28,8 +28,8 @@ from app.schemas.session import GuestSessionContext
 from app.services.audit_service import AuditLogger
 from app.services.station_routing_service import StationRoutingService
 
-# Standard VAT rate (15%)
-STANDARD_TAX_RATE = Decimal("0.15")
+# Default fallback VAT rate (0%)
+STANDARD_TAX_RATE = Decimal("0.0000")
 
 OPEN_ORDER_STATUSES = {
     OrderStatus.DRAFT,
@@ -43,6 +43,45 @@ OPEN_ORDER_STATUSES = {
 
 class OrderService:
     """ACID-compliant order processing, row locking, KDS station routing, and FSM transition management."""
+
+    @classmethod
+    def calculate_order_financials(
+        cls,
+        subtotal: Decimal,
+        order_type: OrderType,
+        tax_rate: Decimal,
+        service_fee_rate: Decimal = Decimal("0.0000"),
+        is_service_taxable: bool = False,
+        service_fee_dine_in_only: bool = True,
+    ) -> dict[str, Decimal]:
+        """Atomically compute order financial ledger with Decimal ROUND_HALF_UP precision."""
+        subtotal = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # Service fee logic: 0 for takeaway if dine-in exclusive
+        if order_type == OrderType.TAKEAWAY and service_fee_dine_in_only:
+            service_fee = Decimal("0.00")
+            effective_service_rate = Decimal("0.0000")
+        else:
+            effective_service_rate = service_fee_rate
+            service_fee = (subtotal * service_fee_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # Tax logic: simple vs compound (tax over service)
+        if is_service_taxable:
+            taxable_base = subtotal + service_fee
+        else:
+            taxable_base = subtotal
+
+        tax = (taxable_base * tax_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        total = subtotal + service_fee + tax
+
+        return {
+            "subtotal": subtotal,
+            "service_fee_rate": effective_service_rate,
+            "service_fee_total": service_fee,
+            "applied_tax_rate": tax_rate,
+            "tax_total": tax,
+            "total_amount": total,
+        }
 
     @classmethod
     async def checkout_order(
@@ -73,6 +112,7 @@ class OrderService:
         # 1. Pessimistic row-level lock on Table record
         table_stmt = (
             select(Table)
+            .options(selectinload(Table.branch))
             .where(Table.id == session.table_id)
             .with_for_update()
         )
@@ -130,7 +170,11 @@ class OrderService:
                 table_id=table.id,
                 status=initial_status,
                 order_type=OrderType.DINE_IN,
+                order_source=OrderSource.QR_CUSTOMER,
                 subtotal=Decimal("0.00"),
+                service_fee_rate=Decimal("0.0000"),
+                service_fee_total=Decimal("0.00"),
+                applied_tax_rate=Decimal("0.0000"),
                 tax_total=Decimal("0.00"),
                 total_amount=Decimal("0.00"),
                 customer_notes=payload.customer_notes,
@@ -168,7 +212,7 @@ class OrderService:
             item_res = await db.execute(item_stmt)
             catalog_item = item_res.scalar_one_or_none()
 
-            if catalog_item is None:
+            if not catalog_item:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="ITEM_NOT_FOUND",
@@ -181,37 +225,24 @@ class OrderService:
                 )
 
             # Validate modifier groups
-            submitted_group_ids = [sel.group_id for sel in item_input.selected_groups]
-            if len(submitted_group_ids) != len(set(submitted_group_ids)):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="DUPLICATE_MODIFIER_GROUP",
-                )
-
-            groups_by_id = {g.id: g for g in catalog_item.modifier_groups}
-            for sel in item_input.selected_groups:
-                if sel.group_id not in groups_by_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="MODIFIER_OPTION_INVALID",
-                    )
-
-            submitted_map = {sel.group_id: sel.option_ids for sel in item_input.selected_groups}
-            selected_snapshots: list[dict[str, Any]] = []
             total_modifier_delta = Decimal("0.00")
+            selected_snapshots: list[dict[str, Any]] = []
 
-            sorted_groups = sorted(
-                catalog_item.modifier_groups,
-                key=lambda g: g.created_at or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc),
-            )
+            # Resolve option IDs from selected_groups or selected_option_ids
+            explicit_option_ids: set[uuid.UUID] = set(item_input.selected_option_ids)
+            for grp_sel in getattr(item_input, "selected_groups", []):
+                oids = getattr(grp_sel, "option_ids", None) or getattr(grp_sel, "selected_option_ids", [])
+                for oid in oids:
+                    explicit_option_ids.add(oid)
 
-            for group in sorted_groups:
-                selected_option_ids = submitted_map.get(group.id, [])
+            for group in catalog_item.modifier_groups:
+                group_option_ids = {opt.id for opt in group.options}
+                selected_option_ids = explicit_option_ids.intersection(group_option_ids)
 
-                if len(selected_option_ids) != len(set(selected_option_ids)):
+                if group.is_required and not selected_option_ids:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="DUPLICATE_MODIFIER_OPTION",
+                        detail="MODIFIER_GROUP_REQUIRED",
                     )
 
                 min_choices = max(group.min_choices, 1 if group.is_required else 0)
@@ -234,14 +265,15 @@ class OrderService:
                         detail="MODIFIER_SELECTION_OUT_OF_BOUNDS",
                     )
 
-                options_by_id = {opt.id: opt for opt in group.options}
+                options_by_id = {opt.id for opt in group.options}
+                options_map = {opt.id: opt for opt in group.options}
                 for opt_id in selected_option_ids:
-                    if opt_id not in options_by_id:
+                    if opt_id not in options_map:
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail="MODIFIER_OPTION_INVALID",
                         )
-                    opt = options_by_id[opt_id]
+                    opt = options_map[opt_id]
                     if not opt.is_available:
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
@@ -297,12 +329,30 @@ class OrderService:
         await db.flush()
         all_items = existing_items + new_items
 
-        # 4. Recompute financial totals across all items with ROUND_HALF_UP
+        # 4. Recompute financial totals across all items using dynamic branch settings
         order_subtotal = sum(Decimal(str(item.subtotal)) for item in all_items)
-        order_tax = (order_subtotal * STANDARD_TAX_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        order_total = order_subtotal + order_tax
+        branch = table.branch if table else None
+        tax_rate = getattr(branch, "tax_rate", STANDARD_TAX_RATE)
+        service_rate = getattr(branch, "service_fee_rate", Decimal("0.0000"))
+        is_service_taxable = getattr(branch, "is_service_taxable", False)
+        service_fee_dine_in_only = getattr(branch, "service_fee_dine_in_only", True)
 
-        order.subtotal = order_subtotal
+        fin = cls.calculate_order_financials(
+            subtotal=order_subtotal,
+            order_type=order.order_type,
+            tax_rate=tax_rate,
+            service_fee_rate=service_rate,
+            is_service_taxable=is_service_taxable,
+            service_fee_dine_in_only=service_fee_dine_in_only,
+        )
+
+        order_tax = fin["tax_total"]
+        order_total = fin["total_amount"]
+
+        order.subtotal = fin["subtotal"]
+        order.service_fee_rate = fin["service_fee_rate"]
+        order.service_fee_total = fin["service_fee_total"]
+        order.applied_tax_rate = fin["applied_tax_rate"]
         order.tax_total = order_tax
         order.total_amount = order_total
 
@@ -564,6 +614,8 @@ class OrderService:
                     unit_price=Decimal(str(oi.unit_price)),
                     subtotal=Decimal(str(oi.subtotal)),
                     station=oi.station,
+                    station_code=getattr(oi, "station_code", None),
+                    station_id=getattr(oi, "station_id", None),
                     is_bumped=oi.is_bumped,
                     selected_modifiers=oi.selected_modifiers,
                     special_instructions=oi.special_instructions,
@@ -571,18 +623,26 @@ class OrderService:
             )
 
         now = datetime.datetime.now(datetime.timezone.utc)
+        od = getattr(order, "__dict__", {})
         return OrderResponse(
-            id=order_id or order.id,
-            tenant_id=tenant_id or order.tenant_id,
-            branch_id=branch_id or order.branch_id,
-            table_id=table_id or order.table_id,
-            status=status or order.status,
-            order_type=order_type or order.order_type,
-            subtotal=subtotal if subtotal is not None else Decimal(str(order.subtotal)),
-            tax_total=tax_total if tax_total is not None else Decimal(str(order.tax_total)),
-            total_amount=total_amount if total_amount is not None else Decimal(str(order.total_amount)),
-            customer_notes=customer_notes if customer_notes is not None else order.customer_notes,
+            id=order_id or od.get("id") or order.id,
+            tenant_id=tenant_id or od.get("tenant_id") or order.tenant_id,
+            branch_id=branch_id or od.get("branch_id") or order.branch_id,
+            table_id=table_id if table_id is not None else od.get("table_id"),
+            status=status or od.get("status") or order.status,
+            order_type=order_type or od.get("order_type") or order.order_type,
+            order_source=od.get("order_source") or getattr(order, "order_source", OrderSource.QR_CUSTOMER),
+            pickup_number=od.get("pickup_number") or getattr(order, "pickup_number", None),
+            subtotal=subtotal if subtotal is not None else Decimal(str(od.get("subtotal") or order.subtotal)),
+            service_fee_rate=od.get("service_fee_rate") or getattr(order, "service_fee_rate", Decimal("0.0000")),
+            service_fee_total=od.get("service_fee_total") or getattr(order, "service_fee_total", Decimal("0.00")),
+            applied_tax_rate=od.get("applied_tax_rate") or getattr(order, "applied_tax_rate", Decimal("0.0000")),
+            tax_total=tax_total if tax_total is not None else Decimal(str(od.get("tax_total") or order.tax_total)),
+            total_amount=total_amount if total_amount is not None else Decimal(str(od.get("total_amount") or order.total_amount)),
+            is_paid=od.get("is_paid", getattr(order, "is_paid", False)),
+            customer_notes=customer_notes if customer_notes is not None else od.get("customer_notes", getattr(order, "customer_notes", None)),
+            cancellation_reason=od.get("cancellation_reason", getattr(order, "cancellation_reason", None)),
             items=items_response,
-            created_at=created_at or getattr(order, "created_at", None) or now,
-            updated_at=updated_at or getattr(order, "updated_at", None) or now,
+            created_at=created_at or od.get("created_at") or now,
+            updated_at=updated_at or od.get("updated_at") or now,
         )
