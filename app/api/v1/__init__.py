@@ -1,4 +1,6 @@
-"""API v1 router assembly."""
+"""API v1 router assembly and factory."""
+
+from __future__ import annotations
 
 from fastapi import APIRouter
 
@@ -6,8 +8,9 @@ from app.api.v1.analytics import router as analytics_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.branches import router as branches_router
-from app.api.v1.floor import router as floor_router
+from app.api.v1.brands import router as brands_router
 from app.api.v1.financials import router as financials_router
+from app.api.v1.floor import router as floor_router
 from app.api.v1.kds import router as kds_router
 from app.api.v1.menu import router as menu_router
 from app.api.v1.orders import router as orders_router
@@ -21,25 +24,46 @@ from app.api.v1.staff_menu import router as staff_menu_router
 from app.api.v1.staff_stations import router as staff_stations_router
 from app.api.v1.websocket import router as websocket_router
 
-api_v1_router = APIRouter()
-api_v1_router.include_router(auth_router)
-api_v1_router.include_router(branches_router)
-api_v1_router.include_router(audit_router)
-api_v1_router.include_router(qr_router)
-api_v1_router.include_router(qr_export_router, prefix="/qr-export")
-api_v1_router.include_router(sessions_router)
-api_v1_router.include_router(menu_router)
-api_v1_router.include_router(staff_menu_router)
-api_v1_router.include_router(staff_stations_router)
-api_v1_router.include_router(orders_router)
-api_v1_router.include_router(pos_router)
-api_v1_router.include_router(floor_router, prefix="/floor")
-api_v1_router.include_router(financials_router, prefix="/financials")
-api_v1_router.include_router(analytics_router, prefix="/analytics")
-api_v1_router.include_router(service_requests_router)
-api_v1_router.include_router(payments_router)
-api_v1_router.include_router(websocket_router)
-api_v1_router.include_router(kds_router)
 
-__all__ = ["api_v1_router"]
+def get_api_v1_router() -> APIRouter:
+    """Construct and assemble the complete v1 API router hierarchy."""
+    router = APIRouter()
 
+    # Core authentication & tenant hierarchy
+    router.include_router(auth_router)
+    router.include_router(branches_router)
+    router.include_router(brands_router)
+
+    # Guest sessions & QR engines
+    router.include_router(sessions_router)
+    router.include_router(qr_router)
+    router.include_router(qr_export_router, prefix="/qr-export")
+
+    # Catalog & Menus
+    router.include_router(menu_router)
+    router.include_router(staff_menu_router)
+    router.include_router(staff_stations_router)
+
+    # Ordering & Kitchen
+    router.include_router(orders_router)
+    router.include_router(pos_router)
+    router.include_router(kds_router)
+    router.include_router(service_requests_router)
+
+    # Operations, Floor, & Financials
+    router.include_router(floor_router, prefix="/floor")
+    router.include_router(financials_router, prefix="/financials")
+    router.include_router(payments_router)
+
+    # Analytics, Audit & Realtime
+    router.include_router(analytics_router, prefix="/analytics")
+    router.include_router(audit_router)
+    router.include_router(websocket_router)
+
+    return router
+
+
+# Module-level singleton instance for backwards compatibility
+api_v1_router = get_api_v1_router()
+
+__all__ = ["api_v1_router", "get_api_v1_router"]

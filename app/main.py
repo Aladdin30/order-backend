@@ -4,11 +4,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from fastapi.routing import APIRoute, _IncludedRouter
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.middleware.audit_middleware import AuditMiddleware
 from app.api.middleware.i18n_middleware import I18nMiddleware
-from app.api.v1 import api_v1_router
+from app.api.v1 import get_api_v1_router
 from app.api.v1.websocket import websocket_gateway
 from app.core.config import settings
 from app.core.exceptions import (
@@ -67,8 +68,36 @@ def create_app() -> FastAPI:
     application.add_exception_handler(RequestValidationError, localized_validation_exception_handler)
 
     # API Routers
-    application.include_router(api_v1_router, prefix=settings.API_V1_STR)
+    v1_router = get_api_v1_router()
+    application.include_router(v1_router, prefix=settings.API_V1_STR)
     application.add_api_websocket_route("/ws", websocket_gateway)
+
+    # Populate flattened route descriptors for external inspection scripts & tools
+    def _flatten_routes(routes, prefix=""):
+        flattened = []
+        for route in routes:
+            if isinstance(route, _IncludedRouter):
+                sub_prefix = prefix + getattr(route.include_context, "prefix", "")
+                flattened.extend(_flatten_routes(route.original_router.routes, sub_prefix))
+            elif isinstance(route, APIRoute):
+                full_path = prefix + route.path
+                cloned = APIRoute(
+                    path=full_path,
+                    endpoint=route.endpoint,
+                    methods=route.methods,
+                    response_model=route.response_model,
+                    status_code=route.status_code,
+                    tags=route.tags,
+                    dependencies=route.dependencies,
+                    summary=route.summary,
+                    description=route.description,
+                    include_in_schema=False,
+                )
+                flattened.append(cloned)
+        return flattened
+
+    for r in _flatten_routes(list(application.routes)):
+        application.routes.append(r)
 
     @application.get("/health", tags=["system"], summary="Service Health Check")
     async def health_check() -> dict[str, str]:
