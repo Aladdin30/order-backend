@@ -108,3 +108,11 @@ class PaymentStatus(StrEnum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     REFUNDED = "REFUNDED"
+
+
+class DrawerStatus(StrEnum):
+    """Operational status of a cash drawer shift."""
+
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+
