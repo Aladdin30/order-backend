@@ -43,6 +43,8 @@ class OrderStatus(StrEnum):
     PREPARING = "PREPARING"
     READY = "READY"
     DELIVERED = "DELIVERED"
+    SERVED = "SERVED"
+    PAID = "PAID"
     CLOSED = "CLOSED"
     CANCELLED = "CANCELLED"
 
@@ -66,6 +68,7 @@ class ServiceRequestType(StrEnum):
     """Guest table-side assistance request categories."""
 
     WATER = "WATER"
+    WATER_REFILL = "WATER_REFILL"
     CUTLERY = "CUTLERY"
     NAPKINS = "NAPKINS"
     PLATES = "PLATES"

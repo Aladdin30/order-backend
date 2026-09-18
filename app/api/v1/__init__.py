@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.branches import router as branches_router
+from app.api.v1.floor import router as floor_router
 from app.api.v1.kds import router as kds_router
 from app.api.v1.menu import router as menu_router
 from app.api.v1.orders import router as orders_router
@@ -28,6 +29,7 @@ api_v1_router.include_router(staff_menu_router)
 api_v1_router.include_router(staff_stations_router)
 api_v1_router.include_router(orders_router)
 api_v1_router.include_router(pos_router)
+api_v1_router.include_router(floor_router, prefix="/floor")
 api_v1_router.include_router(service_requests_router)
 api_v1_router.include_router(payments_router)
 api_v1_router.include_router(websocket_router)

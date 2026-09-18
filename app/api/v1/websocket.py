@@ -48,6 +48,7 @@ async def websocket_gateway(
     websocket: WebSocket,
     token: str | None = Query(None),
     branch_id: str | None = Query(None),
+    channel: str | None = Query(None),
     session_maker: Any = Depends(get_session_factory),
 ) -> None:
     """Real-time ASGI WebSocket gateway endpoint.
@@ -218,6 +219,11 @@ async def websocket_gateway(
             # Cashier channel: subscribed by CASHIER and ADMINs
             if user.role == UserRole.CASHIER or user.role in admin_roles:
                 channels.add(f"branch_{b_id}_cashier")
+
+            # Floor channel: subscribed when explicitly requested (e.g. ?channel=floor)
+            if channel == "floor" or (channel and "floor" in channel.split(",")):
+                if user.role in (UserRole.WAITER, UserRole.CASHIER) or user.role in admin_roles:
+                    channels.add(f"branch_{b_id}_floor")
 
             # Admin management channel
             if user.role in admin_roles:

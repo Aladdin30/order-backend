@@ -200,6 +200,19 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="verified_by_user",
     )
 
+    @property
+    def branch_id(self) -> uuid.UUID | None:
+        """Convenience property for primary assigned branch."""
+        if hasattr(self, "_branch_id") and self._branch_id is not None:
+            return self._branch_id
+        if self.branch_access:
+            return self.branch_access[0].branch_id
+        return None
+
+    @branch_id.setter
+    def branch_id(self, value: uuid.UUID | None) -> None:
+        self._branch_id = value
+
 
 class UserBranchAccess(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Explicit M:N branch scoping association table for regional & branch staff."""

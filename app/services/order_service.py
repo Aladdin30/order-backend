@@ -409,6 +409,20 @@ class OrderService:
                 import logging
                 logging.getLogger("app.services.order_service").warning("Failed to dispatch KDS sub-tickets: %s", kds_exc)
 
+        # 8. Real-Time Floor State Notification Hook
+        if table_id:
+            try:
+                from app.services.floor_table_service import FloorTableService
+                await FloorTableService.broadcast_floor_event(
+                    branch_id=branch_id,
+                    event_type="TABLE_STATUS_CHANGED",
+                    table_id=table_id,
+                    payload={"state": "AWAITING_FOOD", "order_id": str(order_id)},
+                )
+            except Exception as floor_exc:
+                import logging
+                logging.getLogger("app.services.order_service").warning("Failed to broadcast floor state event: %s", floor_exc)
+
         return cls._build_order_response(
             order,
             items=all_items,
@@ -545,6 +559,36 @@ class OrderService:
             except Exception as kds_exc:
                 import logging
                 logging.getLogger("app.services.order_service").warning("Failed to dispatch KDS tickets on transition: %s", kds_exc)
+
+        # 7. Real-Time Floor State Transition Hook
+        if order_ref.table_id:
+            try:
+                from app.services.floor_table_service import FloorTableService
+                if target_status in (OrderStatus.PREPARING, OrderStatus.SUBMITTED):
+                    await FloorTableService.broadcast_floor_event(
+                        branch_id=effective_branch_id,
+                        event_type="TABLE_STATUS_CHANGED",
+                        table_id=order_ref.table_id,
+                        payload={"state": "AWAITING_FOOD", "order_id": str(order.id)},
+                    )
+                elif target_status in (OrderStatus.READY, OrderStatus.DELIVERED, OrderStatus.SERVED):
+                    await FloorTableService.broadcast_floor_event(
+                        branch_id=effective_branch_id,
+                        event_type="TABLE_STATUS_CHANGED",
+                        table_id=order_ref.table_id,
+                        payload={"state": "FOOD_SERVED", "order_id": str(order.id)},
+                    )
+                elif target_status in (OrderStatus.CLOSED, OrderStatus.CANCELLED, OrderStatus.PAID):
+                    if table is not None and not has_other:
+                        await FloorTableService.broadcast_floor_event(
+                            branch_id=effective_branch_id,
+                            event_type="TABLE_CLEARED",
+                            table_id=order_ref.table_id,
+                            payload={"state": "AVAILABLE"},
+                        )
+            except Exception as floor_exc:
+                import logging
+                logging.getLogger("app.services.order_service").warning("Failed to broadcast floor event on transition: %s", floor_exc)
 
         return OrderTransitionResponse(
             order_id=order.id,

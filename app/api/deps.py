@@ -185,10 +185,32 @@ from app.api.deps_session import (  # noqa: E402
     require_presence_verified,
 )
 
+get_db = get_async_db
+
+
+async def get_current_active_user(
+    context: SecurityContext = Depends(get_current_user_context),
+) -> User:
+    """Authenticate calling user and return the User instance."""
+    return context.user
+
+
+def require_roles(allowed_roles: list[UserRole] | set[UserRole]):
+    """Enforce role permissions and return the authenticated User."""
+    def _role_checker(context: SecurityContext = Depends(get_current_user_context)) -> User:
+        context.assert_roles(set(allowed_roles))
+        return context.user
+
+    return _role_checker
+
+
 __all__ = [
     "get_async_db",
+    "get_db",
     "get_current_user_context",
+    "get_current_active_user",
     "RequireRoles",
+    "require_roles",
     "EnforceBranchAccess",
     "get_current_guest_session",
     "require_presence_verified",

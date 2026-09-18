@@ -394,6 +394,19 @@ class POSOrderService:
         except Exception as kds_exc:
             logger.warning("Failed to dispatch POS order to KDS: %s", kds_exc)
 
+        # Real-time floor state notification
+        if table_id:
+            try:
+                from app.services.floor_table_service import FloorTableService
+                await FloorTableService.broadcast_floor_event(
+                    branch_id=branch_id,
+                    event_type="TABLE_STATUS_CHANGED",
+                    table_id=table_id,
+                    payload={"state": "AWAITING_FOOD", "order_id": str(order_id)},
+                )
+            except Exception as floor_exc:
+                logger.warning("Failed to broadcast POS floor event: %s", floor_exc)
+
         return OrderService._build_order_response(
             order,
             items=all_items,
@@ -473,6 +486,7 @@ class POSOrderService:
 
         order_id_val = order.id
         order_status_val = order.status.value
+        cancelled_table_id = order.table.id if order.table else None
 
         await db.commit()
 
@@ -506,6 +520,19 @@ class POSOrderService:
             )
         except Exception as exc:
             logger.warning("Failed to publish cancellation event: %s", exc)
+
+        # Real-time floor state notification
+        if table_freed and cancelled_table_id:
+            try:
+                from app.services.floor_table_service import FloorTableService
+                await FloorTableService.broadcast_floor_event(
+                    branch_id=branch_id,
+                    event_type="TABLE_CLEARED",
+                    table_id=cancelled_table_id,
+                    payload={"state": "AVAILABLE"},
+                )
+            except Exception as floor_exc:
+                logger.warning("Failed to broadcast POS table cleared event: %s", floor_exc)
 
         return POSCancelOrderResponse(
             order_id=order_id_val,

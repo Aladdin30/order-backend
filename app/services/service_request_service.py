@@ -191,6 +191,18 @@ class ServiceRequestService:
         except Exception as exc:
             logger.warning("Failed to broadcast SERVICE_REQUEST_CREATED: %s", exc)
 
+        # Real-time floor state notification
+        try:
+            from app.services.floor_table_service import FloorTableService
+            await FloorTableService.broadcast_floor_event(
+                branch_id=session.branch_id,
+                event_type="FLOOR_SERVICE_CALL",
+                table_id=session.table_id,
+                payload={"action": "CREATED", "request_id": str(new_request.id)},
+            )
+        except Exception as exc:
+            logger.warning("Failed to broadcast FLOOR_SERVICE_CALL CREATED: %s", exc)
+
         # 4. Audit Log
         await AuditLogger.log(
             tenant_id=session.tenant_id,
@@ -332,6 +344,19 @@ class ServiceRequestService:
                 )
             except Exception as exc:
                 logger.warning("Failed to broadcast SERVICE_REQUEST_UPDATED to %s: %s", target_channel, exc)
+
+        # Real-time floor state notification
+        if target_status in (ServiceRequestStatus.COMPLETED, ServiceRequestStatus.ACKNOWLEDGED, ServiceRequestStatus.DISMISSED):
+            try:
+                from app.services.floor_table_service import FloorTableService
+                await FloorTableService.broadcast_floor_event(
+                    branch_id=branch_id,
+                    event_type="FLOOR_SERVICE_CALL",
+                    table_id=req.table_id,
+                    payload={"action": "RESOLVED", "request_id": str(req.id)},
+                )
+            except Exception as exc:
+                logger.warning("Failed to broadcast FLOOR_SERVICE_CALL RESOLVED: %s", exc)
 
         # Audit Log
         await AuditLogger.log(

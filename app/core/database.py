@@ -55,3 +55,7 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     """Dependency helper providing an active AsyncSession."""
     async with async_session_factory() as session:
         yield session
+
+
+# Alias for route dependency injection
+get_db = get_async_session
